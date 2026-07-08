@@ -1,0 +1,163 @@
+import { contextBridge, ipcRenderer } from 'electron'
+
+// Preload — безопасный мост между окном (renderer) и системой (main).
+// Здесь мы выставляем в окно объект window.flow с функциями,
+// которые под капотом обращаются к главному процессу Electron.
+const api = {
+  // Отправить историю диалога в модель LM Studio и получить ответ
+  aiChat: (args: {
+    model: string
+    messages: Array<{ role: 'user' | 'assistant' | 'system'; content: string }>
+    images?: string[]
+  }) => ipcRenderer.invoke('ai:chat', args),
+  // Получить агрегированный список моделей всех включённых провайдеров
+  listModels: () => ipcRenderer.invoke('ai:models'),
+  // Провайдеры моделей (настройки)
+  getProviders: () => ipcRenderer.invoke('providers:list'),
+  saveProviders: (list: unknown) => ipcRenderer.invoke('providers:save', list),
+  // Общие настройки (модель по умолчанию)
+  getSettings: () => ipcRenderer.invoke('settings:get'),
+  saveSettings: (s: unknown) => ipcRenderer.invoke('settings:set', s),
+  // Выполнить Python-код локально (id — id квадрата, для остановки)
+  runCode: (args: { id: string; code: string }) => ipcRenderer.invoke('code:run', args),
+  // Остановить процесс квадрата (при удалении)
+  killCode: (args: { id: string }) => ipcRenderer.invoke('code:kill', args),
+  // Веб-поиск и открытие ссылок
+  webSearch: (args: { query: string }) => ipcRenderer.invoke('web:search', args),
+  openExternal: (args: { url: string }) => ipcRenderer.invoke('shell:open', args),
+  saveFile: (args: { base64: string; name: string }) => ipcRenderer.invoke('file:save', args),
+  // Извлечь текст из PDF / DOCX / PPTX (для вложений в ИИ-ноду)
+  extractDoc: (args: { base64: string; name: string }) => ipcRenderer.invoke('file:extractText', args),
+  // MCP: агентный чат с инструментами + управление серверами
+  agentChat: (args: {
+    model: string
+    messages: Array<{ role: string; content: string }>
+  }) => ipcRenderer.invoke('ai:agentChat', args),
+  mcpList: () => ipcRenderer.invoke('mcp:list'),
+  mcpSave: (list: unknown) => ipcRenderer.invoke('mcp:save', list),
+  // Генерация картинок через ComfyUI
+  comfyModels: () => ipcRenderer.invoke('comfy:models'),
+  comfyGenerate: (args: {
+    checkpoint: string
+    prompt: string
+    negative: string
+    width: number
+    height: number
+    steps: number
+    modelType: string
+  }) => ipcRenderer.invoke('comfy:generate', args),
+  // Локальные сервисы: статус и ручной запуск
+  servicesStatus: () => ipcRenderer.invoke('services:status'),
+  startService: (args: { name: 'comfy' | 'lm' }) => ipcRenderer.invoke('services:start', args),
+  // Автозапуск Flow при входе в Windows
+  getStartup: () => ipcRenderer.invoke('startup:get'),
+  setStartup: (args: { enabled: boolean }) => ipcRenderer.invoke('startup:set', args),
+  // OpenCode — агентный ассистент для кода (headless server)
+  opencodeEnsure: (args: { cwd?: string }) => ipcRenderer.invoke('opencode:ensure', args),
+  opencodeProviders: (args: { cwd?: string }) => ipcRenderer.invoke('opencode:providers', args),
+  opencodeSession: (args: { cwd?: string; title?: string }) => ipcRenderer.invoke('opencode:session', args),
+  opencodeMessage: (args: { cwd?: string; sessionId: string; model?: string; text: string }) =>
+    ipcRenderer.invoke('opencode:message', args),
+  opencodeSetAuth: (args: { cwd?: string; provider: string; key: string }) =>
+    ipcRenderer.invoke('opencode:setAuth', args),
+  // Выбор папки проекта (для рабочей директории OpenCode)
+  pickFolder: () => ipcRenderer.invoke('dialog:pickFolder'),
+  // OpenCode как настоящий терминал (PTY + xterm.js)
+  ptyStart: (args: {
+    id: string
+    cwd?: string
+    cols?: number
+    rows?: number
+    autostart?: boolean
+    autostartCmd?: string
+  }) => ipcRenderer.invoke('pty:start', args),
+  ptyWrite: (args: { id: string; data: string }) => ipcRenderer.send('pty:write', args),
+  ptyResize: (args: { id: string; cols: number; rows: number }) => ipcRenderer.send('pty:resize', args),
+  ptyRun: (args: { id: string; cmd: string; interrupt?: boolean }) => ipcRenderer.send('pty:run', args),
+  ptyKill: (args: { id: string }) => ipcRenderer.send('pty:kill', args),
+  onPtyData: (cb: (d: { id: string; data: string }) => void) => {
+    const h = (_e: unknown, d: { id: string; data: string }) => cb(d)
+    ipcRenderer.on('pty:data', h)
+    return () => ipcRenderer.removeListener('pty:data', h)
+  },
+  onPtyExit: (cb: (d: { id: string; exitCode: number }) => void) => {
+    const h = (_e: unknown, d: { id: string; exitCode: number }) => cb(d)
+    ipcRenderer.on('pty:exit', h)
+    return () => ipcRenderer.removeListener('pty:exit', h)
+  },
+  // AnythingLLM (управляемый сайдкар)
+  anythingEnsure: () => ipcRenderer.invoke('anythingllm:ensure'),
+  anythingState: () => ipcRenderer.invoke('anythingllm:state'),
+  anythingStop: () => ipcRenderer.invoke('anythingllm:stop'),
+  onAnythingProgress: (cb: (p: { phase: string; message: string }) => void) => {
+    const h = (_e: unknown, p: { phase: string; message: string }) => cb(p)
+    ipcRenderer.on('anythingllm:progress', h)
+    return () => ipcRenderer.removeListener('anythingllm:progress', h)
+  },
+  // OpenScience (headless-сервер + webview)
+  openscienceEnsure: () => ipcRenderer.invoke('openscience:ensure'),
+  openscienceState: () => ipcRenderer.invoke('openscience:state'),
+  openscienceStop: () => ipcRenderer.invoke('openscience:stop'),
+  onOpenscienceProgress: (cb: (p: { phase: string; message: string }) => void) => {
+    const h = (_e: unknown, p: { phase: string; message: string }) => cb(p)
+    ipcRenderer.on('openscience:progress', h)
+    return () => ipcRenderer.removeListener('openscience:progress', h)
+  },
+  // Jupyter/Colab-нода: постоянный Python-kernel
+  notebookKernels: () => ipcRenderer.invoke('notebook:kernels'),
+  notebookStart: (args: { id: string; python?: string }) => ipcRenderer.invoke('notebook:start', args),
+  notebookRun: (args: { id: string; cell: string; code: string }) => ipcRenderer.send('notebook:run', args),
+  notebookRestart: (args: { id: string; python?: string }) => ipcRenderer.invoke('notebook:restart', args),
+  notebookShutdown: (args: { id: string }) => ipcRenderer.send('notebook:shutdown', args),
+  onNotebookMsg: (cb: (m: NotebookMsg) => void) => {
+    const h = (_e: unknown, m: NotebookMsg) => cb(m)
+    ipcRenderer.on('notebook:msg', h)
+    return () => ipcRenderer.removeListener('notebook:msg', h)
+  },
+  // PDF-нода: хранение, индекс, RAG-поиск и стриминговый Q&A
+  pdfImport: (args: { base64: string; id: string }) => ipcRenderer.invoke('pdf:import', args),
+  pdfBytes: (args: { id: string }) => ipcRenderer.invoke('pdf:bytes', args),
+  pdfIndexAdd: (args: { id: string; chunks: Array<{ id: string; page: number; text: string; vector: number[] }> }) =>
+    ipcRenderer.invoke('pdf:index-add', args),
+  pdfSearch: (args: { id: string; vector: number[]; topK?: number }) => ipcRenderer.invoke('pdf:search', args),
+  pdfIndexed: (args: { id: string }) => ipcRenderer.invoke('pdf:indexed', args),
+  pdfDelete: (args: { id: string }) => ipcRenderer.invoke('pdf:delete', args),
+  pdfAsk: (args: {
+    reqId: string
+    model: string
+    pdfId: string
+    question: string
+    queryVector?: number[]
+    selection?: string
+    imageDataUrl?: string
+  }) => ipcRenderer.invoke('pdf:ask', args),
+  onPdfStream: (
+    cb: (m: { channel: 'token' | 'done' | 'error'; reqId: string; delta?: string; text?: string; error?: string }) => void
+  ) => {
+    const tok = (_e: unknown, d: { reqId: string; delta: string }) => cb({ channel: 'token', ...d })
+    const don = (_e: unknown, d: { reqId: string; text: string }) => cb({ channel: 'done', ...d })
+    const err = (_e: unknown, d: { reqId: string; error: string }) => cb({ channel: 'error', ...d })
+    ipcRenderer.on('pdf:token', tok)
+    ipcRenderer.on('pdf:done', don)
+    ipcRenderer.on('pdf:error', err)
+    return () => {
+      ipcRenderer.removeListener('pdf:token', tok)
+      ipcRenderer.removeListener('pdf:done', don)
+      ipcRenderer.removeListener('pdf:error', err)
+    }
+  }
+}
+
+type NotebookMsg = {
+  id: string
+  cell?: string
+  type: 'ready' | 'stream' | 'image' | 'result' | 'error' | 'done' | 'exit'
+  name?: string
+  text?: string
+  html?: string | null
+  mime?: string
+  data?: string
+  count?: number
+}
+
+contextBridge.exposeInMainWorld('flow', api)
