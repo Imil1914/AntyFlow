@@ -2,7 +2,7 @@
 // Значения 1:1 из макета (ос/Персональная ОС.dc.html → themes).
 import type { CSSProperties } from 'react'
 
-export type ThemeName = 'Графит' | 'Обсидиан' | 'Тёплый уголь'
+export type ThemeName = 'Графит' | 'Обсидиан' | 'Тёплый уголь' | 'Светлая'
 
 export type ThemeVars = {
   bg: string
@@ -45,15 +45,27 @@ export const THEMES: Record<ThemeName, ThemeVars> = {
     edge: '#453D33',
     text: '#EDE9E3',
     muted: '#A29A8E'
+  },
+  // Светлая тема — как на ранних макетах (белые карточки на светло-сером холсте)
+  Светлая: {
+    bg: '#EEF0F3',
+    grid: '#DCE0E6',
+    panel: '#FFFFFF',
+    panel2: '#F4F6F9',
+    border: '#D5DAE1',
+    edge: '#B4BBC6',
+    text: '#1A1D23',
+    muted: '#6B7280'
   }
 }
 
-export const THEME_ORDER: ThemeName[] = ['Графит', 'Обсидиан', 'Тёплый уголь']
+export const THEME_ORDER: ThemeName[] = ['Графит', 'Обсидиан', 'Тёплый уголь', 'Светлая']
 // Цвет-образец для переключателя тем в статус-баре (фон кнопки)
 export const THEME_SWATCH: Record<ThemeName, string> = {
   Графит: '#15171C',
   Обсидиан: '#131527',
-  'Тёплый уголь': '#181512'
+  'Тёплый уголь': '#181512',
+  Светлая: '#FFFFFF'
 }
 
 // Фиксированные (не зависят от темы) переменные: акцент и цвета типов нод
@@ -92,10 +104,37 @@ export const OS_CSS = `
   body, #root { font-family: 'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif; }
 
   ::-webkit-scrollbar { width: 8px; height: 8px; }
-  ::-webkit-scrollbar-thumb { background: rgba(255,255,255,.12); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text) 22%, transparent); border-radius: 4px; }
   ::-webkit-scrollbar-track { background: transparent; }
 
   @keyframes ppulse { 0%,100%{opacity:1} 50%{opacity:.3} }
+
+  /* ---- Красивые ноды: появление, дыхание бейджа, бегущий блик, поток связей ---- */
+  @keyframes flownode-in { from { opacity:0; transform: translateY(8px) scale(.985) } to { opacity:1; transform:none } }
+  .flow-node-card { animation: flownode-in .30s cubic-bezier(.2,.85,.25,1) both; }
+
+  /* Плашка-бейдж типа ноды: мягкое «дыхание» свечения в цвете типа (--nk) */
+  @keyframes badge-breathe {
+    0%,100% { box-shadow: 0 0 0 0 color-mix(in srgb, var(--nk) 0%, transparent), 0 0 7px -1px color-mix(in srgb, var(--nk) 45%, transparent); }
+    50%     { box-shadow: 0 0 0 1px color-mix(in srgb, var(--nk) 22%, transparent), 0 0 14px 1px color-mix(in srgb, var(--nk) 60%, transparent); }
+  }
+  .flow-badge { animation: badge-breathe 3.4s ease-in-out infinite; }
+  .flow-badge .flow-badge-dot { animation: ppulse 2.4s ease-in-out infinite; }
+
+  /* Верхняя акцентная полоса ноды: бегущий блик */
+  @keyframes accent-shimmer { 0% { background-position: 200% 0 } 100% { background-position: -200% 0 } }
+  .flow-accent-bar { background-size: 200% 100%; animation: accent-shimmer 5.5s linear infinite; }
+
+  /* Связи-стрелки: «текущий» пунктир + мягкое свечение */
+  @keyframes dashflow { to { stroke-dashoffset: -32; } }
+  .os-canvas .tl-arrow-hint, .os-canvas svg .tl-arrow > path,
+  .os-canvas .tl-svg-container path[stroke-dasharray] {
+    animation: dashflow 1.1s linear infinite;
+  }
+
+  /* Плавные переходы hover для карточек-плашек списка */
+  .flow-chip-card { transition: transform .12s ease, box-shadow .12s ease, filter .12s ease; }
+  .flow-chip-card:hover { transform: translateY(-2px); filter: brightness(1.06); }
 
   /* Холст tldraw занимает всю область; фон рисуем сами (радиальная сетка) */
   .os-canvas .tl-container { background: transparent !important; }
@@ -110,8 +149,16 @@ export const OS_CSS = `
   .os-topbtn:hover { filter: brightness(1.15); }
   .os-cmd-item:hover { background: var(--panel2) !important; }
   .os-scroll::-webkit-scrollbar { width: 8px; }
-  .os-scroll::-webkit-scrollbar-thumb { background: rgba(255,255,255,0.14); border-radius: 4px; }
+  .os-scroll::-webkit-scrollbar-thumb { background: color-mix(in srgb, var(--text) 22%, transparent); border-radius: 4px; }
 
-  /* Панель стилей tldraw (справа сверху) — опускаем ниже наших верхних кнопок */
-  .os-canvas .tlui-layout__top__right { margin-top: 44px; }
+  /* Элементы раздвижного сайдбара */
+  .os-rail { cursor: pointer; transition: background .12s ease; }
+  .os-rail:hover { background: rgba(255,255,255,0.06); }
+  .os-rail-label { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+
+  /* Панель стилей tldraw (справа сверху) — небольшой отступ сверху */
+  .os-canvas .tlui-layout__top__right { margin-top: 8px; }
+
+  /* Убираем водяной знак «Made with tldraw» */
+  .tl-watermark_SEE-LICENSE, [class*="tl-watermark"] { display: none !important; }
 `

@@ -42,6 +42,10 @@ declare global {
       }) => Promise<{ ok: boolean; error?: string }>
       servicesStatus: () => Promise<{ comfy: boolean; lm: boolean }>
       startService: (args: { name: 'comfy' | 'lm' }) => Promise<{ ok: true }>
+      sysGpu: () => Promise<
+        { ok: true; name: string; usedMB: number; totalMB: number } | { ok: false }
+      >
+
       getStartup: () => Promise<boolean>
       setStartup: (args: { enabled: boolean }) => Promise<{ ok: boolean; error?: string }>
       runCode: (args: { id: string; code: string }) => Promise<
@@ -143,13 +147,14 @@ declare global {
       }>
       anythingStop: () => Promise<{ ok: true }>
       onAnythingProgress: (cb: (p: { phase: string; message: string }) => void) => () => void
-      openscienceEnsure: () => Promise<{ ok: boolean; url?: string; error?: string }>
+      openscienceEnsure: (args?: { cwd?: string }) => Promise<{ ok: boolean; url?: string; error?: string }>
       openscienceState: () => Promise<{
         phase: string
         message: string
         running: boolean
         url: string
         error: string
+        cwd: string
       }>
       openscienceStop: () => Promise<{ ok: true }>
       onOpenscienceProgress: (cb: (p: { phase: string; message: string }) => void) => () => void
@@ -190,8 +195,107 @@ declare global {
           error?: string
         }) => void
       ) => () => void
+      // Meta-Orchestrator
+      orchStart: (args: {
+        goal: string
+        model?: string
+        budget?: Partial<{
+          project_token_budget: number
+          max_tokens_per_task: number
+          max_iterations_per_mode: number
+          max_parallel_nodes: number
+          max_recursion_depth: number
+        }>
+        materials?: string
+      }) => Promise<{ ok: boolean; projectId?: string; error?: string }>
+      orchCancel: (args: { projectId: string }) => Promise<{ ok: boolean }>
+      orchHumanDecision: (args: {
+        projectId: string
+        requestId: string
+        decision: { decision: 'approve' | 'reject' | 'edit'; feedback?: string }
+      }) => Promise<{ ok: boolean }>
+      orchState: (args: { projectId: string }) => Promise<{ ok: boolean; tree: string | null; log: unknown[] }>
+      orchVaultRead: (args: { key: string }) => Promise<{ ok: boolean; content: string | null }>
+      onOrchTrace: (cb: (m: { projectId: string; entry: OrchTraceEntry }) => void) => () => void
+      onOrchStatus: (cb: (m: OrchStatus) => void) => () => void
+      onOrchDone: (cb: (m: { projectId: string; result: OrchResult }) => void) => () => void
+      onOrchHumanRequest: (cb: (m: OrchHumanRequest) => void) => () => void
+      // Vault — хранилище заметок в стиле Obsidian
+      vaultRoot: () => Promise<{ root: string }>
+      vaultPick: () => Promise<{ ok: boolean; root?: string }>
+      vaultTree: () => Promise<{ root: string; tree: VaultEntry[] }>
+      vaultRead: (args: { path: string }) => Promise<{ ok: true; content: string } | { ok: false; error: string }>
+      vaultWrite: (args: { path: string; content: string }) => Promise<{ ok: boolean; error?: string }>
+      vaultCreate: (args: { dir?: string; name?: string; content?: string }) => Promise<
+        { ok: true; path: string } | { ok: false; error: string }
+      >
+      vaultMkdir: (args: { dir?: string; name?: string }) => Promise<
+        { ok: true; path: string } | { ok: false; error: string }
+      >
+      vaultRename: (args: { path: string; name: string }) => Promise<
+        { ok: true; path: string } | { ok: false; error: string }
+      >
+      vaultMove: (args: { path: string; destDir: string }) => Promise<
+        { ok: true; path: string } | { ok: false; error: string }
+      >
+      vaultDelete: (args: { path: string }) => Promise<{ ok: boolean; error?: string }>
+      vaultReveal: (args: { path: string }) => Promise<{ ok: boolean; error?: string }>
+      onVaultChanged: (cb: () => void) => () => void
+      // Файловая синхронизация холстов
+      canvasStatus: () => Promise<{ enabled: boolean; dir: string }>
+      canvasRead: (args: { key: string }) => Promise<{ snapshot: unknown; updatedAt: number; name?: string } | null>
+      canvasWrite: (args: { key: string; snapshot: unknown; updatedAt: number; name?: string }) => Promise<{ ok: boolean; error?: string }>
+      canvasRemove: (args: { key: string }) => Promise<{ ok: boolean }>
+      canvasBoardsRead: () => Promise<{ boards: Array<{ id: string; name: string; key: string }>; updatedAt: number } | null>
+      canvasBoardsWrite: (args: { boards: unknown; updatedAt: number }) => Promise<{ ok: boolean; error?: string }>
     }
   }
+}
+
+export type VaultEntry = {
+  name: string
+  path: string
+  type: 'dir' | 'file'
+  children?: VaultEntry[]
+}
+
+export type OrchTraceEntry = {
+  command_id: string
+  task_id: string
+  node_id: string
+  mode: string
+  input_refs: string[]
+  output_ref: string
+  cost: { tokens: number; calls: number }
+  duration_ms: number
+  timestamp: number
+  parent_command_id?: string
+  note?: string
+}
+export type OrchStatus = {
+  projectId: string
+  depth?: number
+  task_id: string
+  status: 'pending' | 'running' | 'success' | 'failure' | 'partial' | 'needs_human_review'
+  mode?: string
+  summary?: string
+}
+export type OrchResult = {
+  task_id: string
+  status: string
+  output_vault_key: string
+  summary: string
+  confidence: number
+  cost_spent: { tokens: number; calls: number }
+  issues: string[]
+}
+export type OrchHumanRequest = {
+  request_id: string
+  project_id: string
+  task_id: string
+  reason: string
+  best_output_key: string
+  best_summary: string
 }
 
 export type NotebookMsg = {

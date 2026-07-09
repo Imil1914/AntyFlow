@@ -1,0 +1,18 @@
+# Конфиг Cloudflare Worker для real-time синхронизации досок Flow.
+# Деплой: cd sync-server && npm install && npx wrangler deploy
+# SQLite-backed Durable Objects работают на бесплатном плане Workers — R2 не нужен.
+
+name = "flow-sync"
+main = "src/worker.ts"
+compatibility_date = "2024-11-01"
+compatibility_flags = ["nodejs_compat"]
+
+# Комнаты-доски: каждая доска = свой экземпляр Durable Object (по roomId).
+# Снапшот доски хранится в SQLite-хранилище самого DO.
+[[durable_objects.bindings]]
+name = "FLOW_SYNC"
+class_name = "FlowSyncRoom"
+
+[[migrations]]
+tag = "v1"
+new_sqlite_classes = ["FlowSyncRoom"]

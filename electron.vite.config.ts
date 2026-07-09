@@ -1,3 +1,4 @@
+import { resolve } from 'path'
 import { defineConfig, externalizeDepsPlugin } from 'electron-vite'
 import react from '@vitejs/plugin-react'
 
@@ -8,7 +9,23 @@ import react from '@vitejs/plugin-react'
 export default defineConfig({
   // externalizeDepsPlugin оставляет node-зависимости внешними —
   // нужно для ESM-модуля MCP SDK (грузим через динамический import).
-  main: { plugins: [externalizeDepsPlugin()] },
+  main: {
+    plugins: [externalizeDepsPlugin()],
+    build: {
+      rollupOptions: {
+        // Второй вход — воркер оркестратора (worker_threads). Собирается в
+        // out/main/orchestratorWorker.js рядом с index.js (main спавнит его оттуда).
+        input: {
+          index: resolve('src/main/index.ts'),
+          orchestratorWorker: resolve('src/main/orchestrator/worker.ts')
+        },
+        output: {
+          format: 'cjs',
+          entryFileNames: '[name].js'
+        }
+      }
+    }
+  },
   preload: { plugins: [externalizeDepsPlugin()] },
   renderer: {
     base: './',

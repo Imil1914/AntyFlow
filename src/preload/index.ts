@@ -49,6 +49,7 @@ const api = {
   // Локальные сервисы: статус и ручной запуск
   servicesStatus: () => ipcRenderer.invoke('services:status'),
   startService: (args: { name: 'comfy' | 'lm' }) => ipcRenderer.invoke('services:start', args),
+  sysGpu: () => ipcRenderer.invoke('sys:gpu'),
   // Автозапуск Flow при входе в Windows
   getStartup: () => ipcRenderer.invoke('startup:get'),
   setStartup: (args: { enabled: boolean }) => ipcRenderer.invoke('startup:set', args),
@@ -95,7 +96,7 @@ const api = {
     return () => ipcRenderer.removeListener('anythingllm:progress', h)
   },
   // OpenScience (headless-сервер + webview)
-  openscienceEnsure: () => ipcRenderer.invoke('openscience:ensure'),
+  openscienceEnsure: (args?: { cwd?: string }) => ipcRenderer.invoke('openscience:ensure', args),
   openscienceState: () => ipcRenderer.invoke('openscience:state'),
   openscienceStop: () => ipcRenderer.invoke('openscience:stop'),
   onOpenscienceProgress: (cb: (p: { phase: string; message: string }) => void) => {
@@ -145,6 +146,77 @@ const api = {
       ipcRenderer.removeListener('pdf:done', don)
       ipcRenderer.removeListener('pdf:error', err)
     }
+  },
+  // Meta-Orchestrator: запуск/отмена/human-review + подписки на трейс/статусы
+  orchStart: (args: {
+    goal: string
+    model?: string
+    budget?: Record<string, number>
+    materials?: string
+  }) => ipcRenderer.invoke('orch:start', args),
+  orchCancel: (args: { projectId: string }) => ipcRenderer.invoke('orch:cancel', args),
+  orchHumanDecision: (args: {
+    projectId: string
+    requestId: string
+    decision: { decision: 'approve' | 'reject' | 'edit'; feedback?: string }
+  }) => ipcRenderer.invoke('orch:humanDecision', args),
+  orchState: (args: { projectId: string }) => ipcRenderer.invoke('orch:state', args),
+  orchVaultRead: (args: { key: string }) => ipcRenderer.invoke('orch:vaultRead', args),
+  onOrchTrace: (cb: (m: { projectId: string; entry: unknown }) => void) => {
+    const h = (_e: unknown, m: { projectId: string; entry: unknown }) => cb(m)
+    ipcRenderer.on('orch:trace', h)
+    return () => ipcRenderer.removeListener('orch:trace', h)
+  },
+  onOrchStatus: (cb: (m: Record<string, unknown>) => void) => {
+    const h = (_e: unknown, m: Record<string, unknown>) => cb(m)
+    ipcRenderer.on('orch:status', h)
+    return () => ipcRenderer.removeListener('orch:status', h)
+  },
+  onOrchDone: (cb: (m: { projectId: string; result: unknown }) => void) => {
+    const h = (_e: unknown, m: { projectId: string; result: unknown }) => cb(m)
+    ipcRenderer.on('orch:done', h)
+    return () => ipcRenderer.removeListener('orch:done', h)
+  },
+  // Vault — хранилище заметок в стиле Obsidian (реальные .md на диске)
+  vaultRoot: () => ipcRenderer.invoke('vault:root'),
+  vaultPick: () => ipcRenderer.invoke('vault:pick'),
+  vaultTree: () => ipcRenderer.invoke('vault:tree'),
+  vaultRead: (args: { path: string }) => ipcRenderer.invoke('vault:read', args),
+  vaultWrite: (args: { path: string; content: string }) => ipcRenderer.invoke('vault:write', args),
+  vaultCreate: (args: { dir?: string; name?: string; content?: string }) =>
+    ipcRenderer.invoke('vault:create', args),
+  vaultMkdir: (args: { dir?: string; name?: string }) => ipcRenderer.invoke('vault:mkdir', args),
+  vaultRename: (args: { path: string; name: string }) => ipcRenderer.invoke('vault:rename', args),
+  vaultMove: (args: { path: string; destDir: string }) => ipcRenderer.invoke('vault:move', args),
+  vaultDelete: (args: { path: string }) => ipcRenderer.invoke('vault:delete', args),
+  vaultReveal: (args: { path: string }) => ipcRenderer.invoke('vault:reveal', args),
+  onVaultChanged: (cb: () => void) => {
+    const h = () => cb()
+    ipcRenderer.on('vault:changed', h)
+    return () => ipcRenderer.removeListener('vault:changed', h)
+  },
+  // Файловая синхронизация холстов через папку Vault
+  canvasStatus: () => ipcRenderer.invoke('canvas:status'),
+  canvasRead: (args: { key: string }) => ipcRenderer.invoke('canvas:read', args),
+  canvasWrite: (args: { key: string; snapshot: unknown; updatedAt: number; name?: string }) =>
+    ipcRenderer.invoke('canvas:write', args),
+  canvasRemove: (args: { key: string }) => ipcRenderer.invoke('canvas:remove', args),
+  canvasBoardsRead: () => ipcRenderer.invoke('canvas:boards:read'),
+  canvasBoardsWrite: (args: { boards: unknown; updatedAt: number }) =>
+    ipcRenderer.invoke('canvas:boards:write', args),
+  onOrchHumanRequest: (
+    cb: (m: {
+      request_id: string
+      project_id: string
+      task_id: string
+      reason: string
+      best_output_key: string
+      best_summary: string
+    }) => void
+  ) => {
+    const h = (_e: unknown, m: Parameters<typeof cb>[0]) => cb(m)
+    ipcRenderer.on('orch:humanRequest', h)
+    return () => ipcRenderer.removeListener('orch:humanRequest', h)
   }
 }
 

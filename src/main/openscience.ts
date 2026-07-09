@@ -18,6 +18,10 @@ let lastError = ''
 let url = ''
 let proc: ChildProcess | null = null
 let progressCb: ((p: Progress) => void) | null = null
+// Рабочая папка запущенного сервера = «проект» openscience (сессии/чаты
+// привязаны к worktree=cwd). Нужна, чтобы понять, надо ли перезапускать сервер
+// при выборе другой папки проекта в ноде.
+let serverCwd = ''
 
 export function onOpensciProgress(cb: (p: Progress) => void): void {
   progressCb = cb
@@ -72,22 +76,36 @@ export async function opensciState(): Promise<{
   running: boolean
   url: string
   error: string
+  cwd: string
 }> {
   const running = phase === 'running' && !!url ? await isHealthy(url) : false
-  return { phase: running ? 'running' : phase, message, running, url, error: lastError }
+  return { phase: running ? 'running' : phase, message, running, url, error: lastError, cwd: serverCwd }
 }
 
-// Поднять (или переиспользовать) сервер openscience и дождаться готовности.
-export async function ensureOpenscience(): Promise<{ ok: boolean; url?: string; error?: string }> {
+// Поднять (или переиспользовать) сервер openscience в нужной папке-проекте и
+// дождаться готовности. cwd задаёт «проект» (сессии привязаны к нему); если сервер
+// уже поднят в ДРУГОЙ папке — перезапускаем в запрошенной.
+export async function ensureOpenscience(cwd?: string): Promise<{ ok: boolean; url?: string; error?: string }> {
   const target = `http://localhost:${PORT}`
-  // Порт уже отвечает — используем этот сервер (в т.ч. осиротевший процесс прошлой
-  // сессии Flow), а не поднимаем второй, который упал бы с «port in use».
-  if (await isHealthy(target)) {
-    url = target
-    setPhase('running', target)
-    return { ok: true, url: target }
+  const targetCwd = cwd || app.getPath('home')
+  const healthy = await isHealthy(target)
+  if (healthy) {
+    // Реюзаем, если папка не задана явно или совпадает с текущим проектом сервера.
+    if (!cwd || serverCwd === targetCwd) {
+      url = target
+      if (!serverCwd) serverCwd = targetCwd
+      setPhase('running', target)
+      return { ok: true, url: target }
+    }
+    // Нужен другой проект → гасим текущий сервер и ждём освобождения порта.
+    setPhase('starting', 'Переключаю проект…')
+    stopOpenscience()
+    for (let i = 0; i < 25; i++) {
+      await new Promise((r) => setTimeout(r, 400))
+      if (!(await isHealthy(target))) break
+    }
   }
-  if (phase === 'starting') return { ok: false, error: 'Запуск уже идёт' }
+  if (phase === 'starting' && proc) return { ok: false, error: 'Запуск уже идёт' }
   if (proc) {
     try {
       proc.kill()
@@ -111,11 +129,12 @@ export async function ensureOpenscience(): Promise<{ ok: boolean; url?: string; 
 
     // BROWSER=none — на случай, если serve всё же попробует открыть браузер.
     const env = { ...process.env, BROWSER: 'none', CI: '1' }
+    serverCwd = targetCwd // «проект» openscience определяется рабочей папкой
     let p: ChildProcess
     try {
       p = spawn('openscience serve --port ' + PORT, {
         shell: true,
-        cwd: app.getPath('home'),
+        cwd: targetCwd,
         env,
         windowsHide: true
       })
@@ -187,6 +206,19 @@ export function stopOpenscience(): void {
       /* ignore */
     }
     proc = null
+  }
+  // Дополнительно освобождаем порт от ЛЮБОГО слушателя (в т.ч. осиротевшего сервера
+  // прошлой сессии, который мы не отслеживаем) — иначе рестарт в другой папке-проекте
+  // упадёт с «port in use».
+  if (process.platform === 'win32') {
+    try {
+      spawn(
+        `for /f "tokens=5" %a in ('netstat -ano ^| findstr :${PORT} ^| findstr LISTENING') do taskkill /PID %a /F /T`,
+        { shell: true, windowsHide: true }
+      )
+    } catch {
+      /* ignore */
+    }
   }
   phase = 'idle'
   url = ''

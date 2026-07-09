@@ -6,9 +6,16 @@ import { ensureAnything, anyState, stopAnything, onAnyProgress } from './anythin
 import { ensureOpenscience, opensciState, stopOpenscience, onOpensciProgress } from './openscience'
 import { registerNotebookIpc, stopAllKernels } from './notebook'
 import { registerPdfIpc, searchPdf } from './pdf'
+import { registerOrchestratorIpc, stopAllOrchestrations } from './orchestrator'
+import { registerVaultIpc, stopVaultWatcher } from './vault'
+import { registerCanvasSyncIpc } from './canvas-sync'
 
 registerNotebookIpc()
 registerPdfIpc()
+registerVaultIpc()
+registerCanvasSyncIpc()
+// callModel и getSettings — function declarations (hoisted), поэтому доступны здесь.
+registerOrchestratorIpc({ callModel, getDefaultModel: () => getSettings().defaultModel })
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import JSZip from 'jszip'
@@ -489,7 +496,7 @@ onOpensciProgress((p) => {
     }
   }
 })
-ipcMain.handle('openscience:ensure', async () => ensureOpenscience())
+ipcMain.handle('openscience:ensure', async (_e, args?: { cwd?: string }) => ensureOpenscience(args?.cwd))
 ipcMain.handle('openscience:state', async () => opensciState())
 ipcMain.handle('openscience:stop', async () => {
   stopOpenscience()
@@ -625,6 +632,8 @@ app.on('will-quit', () => {
   stopAnything()
   stopOpenscience()
   stopAllKernels()
+  stopAllOrchestrations()
+  stopVaultWatcher()
 })
 
 const COMFY_URLS = ['http://127.0.0.1:8188/system_stats', 'http://127.0.0.1:8000/system_stats']
@@ -641,6 +650,33 @@ ipcMain.handle('services:status', async () => ({
   comfy: await isUp(COMFY_URLS),
   lm: await isUp(LM_URLS)
 }))
+
+// Реальная видеопамять/имя GPU через nvidia-smi (если драйвер NVIDIA установлен).
+ipcMain.handle('sys:gpu', async () => {
+  return new Promise((resolve) => {
+    let out = ''
+    try {
+      const p = spawn(
+        'nvidia-smi',
+        ['--query-gpu=name,memory.used,memory.total', '--format=csv,noheader,nounits'],
+        { shell: true }
+      )
+      p.stdout.on('data', (d) => (out += String(d)))
+      p.on('error', () => resolve({ ok: false as const }))
+      p.on('close', () => {
+        const line = out.trim().split('\n')[0]
+        if (!line) return resolve({ ok: false as const })
+        const [name, used, total] = line.split(',').map((s) => s.trim())
+        const usedMB = Number(used)
+        const totalMB = Number(total)
+        if (!totalMB || Number.isNaN(totalMB)) return resolve({ ok: false as const })
+        resolve({ ok: true as const, name, usedMB, totalMB })
+      })
+    } catch {
+      resolve({ ok: false as const })
+    }
+  })
+})
 ipcMain.handle('services:start', async (_e, args: { name: 'comfy' | 'lm' }) => {
   const s = getSettings()
   if (args.name === 'comfy') launchDetached(s.comfyCmd, s.comfyCwd)
@@ -713,16 +749,18 @@ ipcMain.handle('ai:models', async () => {
   return out
 })
 
-// Отправить диалог модели выбранного провайдера
-ipcMain.handle(
-  'ai:chat',
-  async (_e, args: { model: string; messages: ChatMessage[]; images?: string[] }) => {
+// Вызов модели выбранного провайдера. Вынесено из хендлера ai:chat, чтобы
+// переиспользовать в оркестраторе (main/orchestrator брокер вызывает напрямую).
+export async function callModel(args: {
+  model: string
+  messages: ChatMessage[]
+  images?: string[]
+  timeoutMs?: number
+}): Promise<{ ok: true; content: string; totalTokens: number } | { ok: false; error: string }> {
   // Пустая модель → берём модель по умолчанию из настроек
   const chosen = args.model || getSettings().defaultModel || ''
   // chosen = "providerId::modelId" (или просто modelId → считаем LM Studio)
-  const [providerId, ...rest] = chosen.includes('::')
-    ? chosen.split('::')
-    : ['lmstudio', chosen]
+  const [providerId, ...rest] = chosen.includes('::') ? chosen.split('::') : ['lmstudio', chosen]
   const modelId = rest.join('::') || chosen
   const providers = getProviders()
   const p = providers.find((x) => x.id === providerId) ?? providers.find((x) => x.id === 'lmstudio')
@@ -746,11 +784,15 @@ ipcMain.handle(
     )
   }
   try {
-    const r = await fetchT(`${p.baseURL}/chat/completions`, {
-      method: 'POST',
-      headers: authHeaders(p),
-      body: JSON.stringify({ model: modelId, messages: msgs, stream: false })
-    })
+    const r = await fetchT(
+      `${p.baseURL}/chat/completions`,
+      {
+        method: 'POST',
+        headers: authHeaders(p),
+        body: JSON.stringify({ model: modelId, messages: msgs, stream: false })
+      },
+      args.timeoutMs
+    )
     if (!r.ok) {
       const t = await r.text()
       return { ok: false as const, error: `${p.name}: ошибка ${r.status}: ${t}` }
@@ -774,7 +816,12 @@ ipcMain.handle(
             : `Не удалось подключиться к ${p.name}. Проверь baseURL и ключ в ⚙ Настройках.`
     }
   }
-  }
+}
+
+// Отправить диалог модели выбранного провайдера
+ipcMain.handle(
+  'ai:chat',
+  async (_e, args: { model: string; messages: ChatMessage[]; images?: string[] }) => callModel(args)
 )
 
 // --- MCP: список серверов, сохранение, агентный чат ---

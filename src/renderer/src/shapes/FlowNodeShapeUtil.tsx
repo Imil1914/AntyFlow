@@ -1,22 +1,32 @@
 import React, { useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
+  ArrowShapeUtil,
+  CubicBezier2d,
+  Group2d,
   HTMLContainer,
   Rectangle2d,
+  SVGContainer,
   ShapeUtil,
   T,
+  Vec,
   createShapeId,
+  getArrowBindings,
+  getArrowTerminalsInArrowSpace,
   resizeBox,
   stopEventPropagation,
   toRichText,
+  useValue,
   type Editor,
   type RecordProps,
+  type TLArrowShape,
   type TLBaseShape,
   type TLResizeInfo
 } from 'tldraw'
 import { Terminal } from '@xterm/xterm'
 import { FitAddon } from '@xterm/addon-fit'
 import '@xterm/xterm/css/xterm.css'
+import * as XLSX from 'xlsx'
 import hljs from 'highlight.js/lib/core'
 import pythonLang from 'highlight.js/lib/languages/python'
 hljs.registerLanguage('python', pythonLang)
@@ -112,7 +122,44 @@ const KINDS: Record<string, { color: string; grad: string; icon: string }> = {
   anythingllm: { color: '#14B8A6', grad: 'linear-gradient(160deg,#2dd4bf,#14B8A6)', icon: '🧠' },
   openscience: { color: '#2C7BE5', grad: 'linear-gradient(160deg,#5b9cf0,#2C7BE5)', icon: '🔬' },
   notebook: { color: '#F9A825', grad: 'linear-gradient(160deg,#ffca28,#F9A825)', icon: '📓' },
-  pdf: { color: '#FF6B6B', grad: 'linear-gradient(160deg,#ff8a8a,#FF6B6B)', icon: '📕' }
+  pdf: { color: '#FF6B6B', grad: 'linear-gradient(160deg,#ff8a8a,#FF6B6B)', icon: '📕' },
+  orchestrator: { color: '#A78BFA', grad: 'linear-gradient(160deg,#c4b1ff,#A78BFA)', icon: '🕸' },
+  orchtask: { color: '#A78BFA', grad: 'linear-gradient(160deg,#c4b1ff,#A78BFA)', icon: '◈' },
+  orchcall: { color: '#38BDF8', grad: 'linear-gradient(160deg,#7dd3fc,#38BDF8)', icon: '▹' },
+  list: { color: '#F59E0B', grad: 'linear-gradient(160deg,#fbbf5a,#F59E0B)', icon: '🗂' },
+  listcard: { color: '#F59E0B', grad: 'linear-gradient(160deg,#fbbf5a,#F59E0B)', icon: '🗂' },
+  kanban: { color: '#38BDF8', grad: 'linear-gradient(160deg,#7dd3fc,#38BDF8)', icon: '📋' },
+  board: { color: '#818CF8', grad: 'linear-gradient(160deg,#a5b4fc,#818CF8)', icon: '🗂' },
+  sheet: { color: '#34D399', grad: 'linear-gradient(160deg,#6ee7b7,#34D399)', icon: '▦' }
+}
+
+// Короткое имя типа ноды для анимированной плашки-бейджа в шапке.
+const KIND_NAME: Record<string, string> = {
+  note: 'Заметка',
+  ai: 'ИИ-чат',
+  doc: 'Документ',
+  answer: 'Ответ',
+  code: 'Код',
+  codeblock: 'Код',
+  search: 'Поиск',
+  image: 'Картинка',
+  deck: 'Слайды',
+  slide: 'Слайд',
+  ref: 'Референс',
+  diagram: 'Схема',
+  opencode: 'OpenCode',
+  anythingllm: 'AnythingLLM',
+  openscience: 'OpenScience',
+  notebook: 'Ноутбук',
+  pdf: 'PDF',
+  orchestrator: 'Оркестратор',
+  orchtask: 'Задача',
+  orchcall: 'Вызов',
+  list: 'Список',
+  listcard: 'Список',
+  kanban: 'Канбан',
+  board: 'Бэклог',
+  sheet: 'Таблица'
 }
 
 // Собрать референсы, присоединённые к ноде стрелками (картинки + текст)
@@ -203,6 +250,24 @@ function extractNodeContext(editor: Editor, s: FlowNodeShape): string {
   if (p.kind === 'answer') {
     return p.body ? `Ответ${title && title !== 'Ответ' ? ` «${title}»` : ''}:\n${p.body}` : ''
   }
+  if (p.kind === 'kanban') {
+    try {
+      const board = kanbanToText(readKanban(p.extra))
+      if (board.trim()) return `Канбан-доска${title ? ` «${title}»` : ''}:\n${board}`
+    } catch {
+      /* ignore */
+    }
+    return ''
+  }
+  if (p.kind === 'board') {
+    try {
+      const frame = boardToText(readBoard(p.extra))
+      if (frame.trim()) return `Бэклог${title ? ` «${title}»` : ''}:\n${frame}`
+    } catch {
+      /* ignore */
+    }
+    return ''
+  }
   if (p.kind === 'notebook') {
     // Ноутбук хранит ячейки в history — собираем код + вывод в читаемый текст
     try {
@@ -237,7 +302,7 @@ function extractNodeContext(editor: Editor, s: FlowNodeShape): string {
 // Собрать контекст из нод, соединённых стрелкой с этим чатом — В ЛЮБУЮ СТОРОНУ.
 // Любой файл/заметка/ноутбук/код/схема/ответ, связанный стрелкой с чатом, попадает
 // в контекст. Исключаем: живые чаты с моделью и собственные ответы этого чата.
-function gatherChatContext(editor: Editor, nodeId: string): string[] {
+function gatherChatContext(editor: Editor, nodeId: string, skipKinds?: Set<string>): string[] {
   const out: string[] = []
   const seen = new Set<string>()
   try {
@@ -254,6 +319,7 @@ function gatherChatContext(editor: Editor, nodeId: string): string[] {
         if (!src || src.type !== 'flow-node') continue
         if (src.id === nodeId) continue // сам себя не тянем
         if (src.props.sourceId === nodeId) continue // это собственный вывод этого чата
+        if (skipKinds && skipKinds.has(src.props.kind)) continue // напр. оверлей-ноды оркестратора
         const ctx = extractNodeContext(editor, src)
         if (ctx) out.push(ctx.slice(0, 8000))
       }
@@ -263,6 +329,9 @@ function gatherChatContext(editor: Editor, nodeId: string): string[] {
   }
   return out
 }
+
+// Ноды, которые оркестратор НЕ должен втягивать в контекст (его собственный оверлей).
+const ORCH_SKIP_KINDS = new Set(['orchtask', 'orchcall', 'orchestrator'])
 
 const IMAGE_SIZES: Record<string, [number, number]> = {
   'Квадрат 1024': [1024, 1024],
@@ -296,8 +365,9 @@ function connectArrow(editor: Editor, fromId: string, toId: string) {
       type: 'arrow',
       props: {
         arrowheadStart: 'dot',
-        arrowheadEnd: 'dot',
-        color: 'grey',
+        arrowheadEnd: 'arrow',
+        color: 'light-blue',
+        dash: 'dashed',
         size: 's'
       }
     })
@@ -315,6 +385,81 @@ function connectArrow(editor: Editor, fromId: string, toId: string) {
     } as never)
   } catch {
     /* стрелки не критичны */
+  }
+}
+
+// Геометрия «гибкой» связи: кубический безье с горизонтальными касательными,
+// как в нодовых редакторах (ReactFlow/Jay Flow). Точки берём из реальных
+// терминалов стрелки (учитывают привязку к нодам и их положение).
+function flowEdgeGeom(editor: Editor, shape: TLArrowShape) {
+  const bindings = getArrowBindings(editor, shape)
+  const { start, end } = getArrowTerminalsInArrowSpace(editor, shape, bindings)
+  const sx = start.x
+  const sy = start.y
+  const ex = end.x
+  const ey = end.y
+  // Чем дальше ноды по горизонтали — тем длиннее «плечо» касательной (плавнее изгиб).
+  const dist = Math.max(Math.abs(ex - sx) * 0.5, 34)
+  return { sx, sy, ex, ey, c1x: sx + dist, c1y: sy, c2x: ex - dist, c2y: ey }
+}
+
+function flowEdgePath(g: ReturnType<typeof flowEdgeGeom>) {
+  return `M ${g.sx},${g.sy} C ${g.c1x},${g.c1y} ${g.c2x},${g.c2y} ${g.ex},${g.ey}`
+}
+
+// Переопределяем встроенную стрелку tldraw: тот же тип `arrow` и те же привязки,
+// но рисуем плавную S-кривую вместо жёсткой прямой. Регистрируется в App рядом
+// с FlowNodeShapeUtil и по совпадению type замещает дефолтный ArrowShapeUtil.
+export class FlowArrowShapeUtil extends ArrowShapeUtil {
+  override getGeometry(shape: TLArrowShape) {
+    const g = flowEdgeGeom(this.editor, shape)
+    const curve = new CubicBezier2d({
+      start: new Vec(g.sx, g.sy),
+      cp1: new Vec(g.c1x, g.c1y),
+      cp2: new Vec(g.c2x, g.c2y),
+      end: new Vec(g.ex, g.ey)
+    })
+    return new Group2d({ children: [curve] })
+  }
+
+  override component(shape: TLArrowShape) {
+    const editor = this.editor
+    const g = useValue('flow-edge', () => flowEdgeGeom(editor, shape), [editor, shape.id])
+    const d = flowEdgePath(g)
+    // Наконечник-стрелка по направлению касательной на конце.
+    const ang = Math.atan2(g.ey - g.c2y, g.ex - g.c2x)
+    const ah = 8
+    const a1x = g.ex - ah * Math.cos(ang - Math.PI / 7)
+    const a1y = g.ey - ah * Math.sin(ang - Math.PI / 7)
+    const a2x = g.ex - ah * Math.cos(ang + Math.PI / 7)
+    const a2y = g.ey - ah * Math.sin(ang + Math.PI / 7)
+    const col = 'var(--edge, #8b93a7)'
+    return (
+      <SVGContainer>
+        <path
+          d={d}
+          fill="none"
+          stroke={col}
+          strokeWidth={2}
+          strokeLinecap="round"
+          style={{ opacity: 0.85 }}
+        />
+        <circle cx={g.sx} cy={g.sy} r={3.5} fill={col} style={{ opacity: 0.9 }} />
+        <path
+          d={`M ${a1x},${a1y} L ${g.ex},${g.ey} L ${a2x},${a2y}`}
+          fill="none"
+          stroke={col}
+          strokeWidth={2}
+          strokeLinecap="round"
+          strokeLinejoin="round"
+          style={{ opacity: 0.9 }}
+        />
+      </SVGContainer>
+    )
+  }
+
+  override indicator(shape: TLArrowShape) {
+    return <path d={flowEdgePath(flowEdgeGeom(this.editor, shape))} />
   }
 }
 
@@ -2733,6 +2878,10 @@ const prevHMap = new Map<string, number>()
 const HEADER_H = 39
 const NODE_SANS = "'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif"
 const NODE_MONO = "'JetBrains Mono', monospace"
+// Шрифт ДЛЯ ТЕРМИНАЛА xterm: системный моноширинный (есть сразу, без веб-загрузки).
+// Веб-шрифт (JetBrains Mono) грузится асинхронно — xterm мерит ячейку до загрузки и
+// сетка «плывёт». Consolas на Windows доступен мгновенно → измерение корректно.
+const OC_TERM_FONT = "Consolas, 'Cascadia Mono', 'Courier New', monospace"
 
 // Кружок-порт на краю ноды (как в макете): слева — нейтральный, справа — цвета типа
 function PortDot({ side, color }: { side: 'left' | 'right'; color: string }) {
@@ -2850,6 +2999,15 @@ function ContextPort({
 // Нода поднимает реальный псевдотерминал в выбранной папке и запускает в нём
 // `opencode` — тот же интерфейс, что в обычном терминале, включая его родной
 // выбор модели (/models) и авторизацию по API-ключу (opencode auth login).
+// Базовый кегль терминала (в CSS-пикселях при зуме холста = 1).
+const OC_FONT_SIZE = 12
+// tldraw держит ноду в масштабированном/дробно-сдвинутом слое, а DOM-рендерер xterm —
+// растровый композитный слой, поэтому при зуме ≠ 1 (и даже из-за суб-пиксельного сдвига)
+// он пересэмплируется и мылится. Лечим так: рендерим терминал во внутренней плотности m,
+// совпадающей с экранным масштабом (ступени, чтобы не дёргать рендер на каждый тик зума),
+// и ужимаем обратно scale(1/m). Сетка cols/rows не меняется — TUI не реформатируется.
+const OC_DENSITY_LEVELS = [0.5, 0.75, 1, 1.5, 2, 3, 4]
+const ocDensity = (z: number): number => OC_DENSITY_LEVELS.find((l) => l >= z) ?? 4
 const OC_THEME = {
   background: '#0d1117',
   foreground: '#c9d1d9',
@@ -2908,6 +3066,11 @@ function OcToolBtn({
   )
 }
 
+// Запоминаем подобранную сетку терминала (cols/rows) по id ноды. Переживает
+// культинг/ремаунт ноды — при возврате восстанавливаем ту же сетку, чтобы TUI не
+// «съезжал» (иначе fit() на разном зуме даёт разный размер и буфер реплеится криво).
+const ocTermSizes = new Map<string, { cols: number; rows: number }>()
+
 function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
   const update = useUpdate(editor, shape)
   const ex = parseExtra(shape.props.extra) as { cwd?: string }
@@ -2916,17 +3079,22 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
   const id = String(shape.id)
 
   const wrapRef = useRef<HTMLDivElement>(null)
+  const hostRef = useRef<HTMLDivElement>(null)
   const termRef = useRef<Terminal | null>(null)
   const fitRef = useRef<FitAddon | null>(null)
   const [alive, setAlive] = useState(false)
 
+  // Плотность рендера терминала под текущий зум холста (см. ocDensity выше).
+  const m = useValue('oc-density', () => ocDensity(editor.getZoomLevel()), [editor])
+
   // Создаём терминал, когда выбрана папка. Живёт, пока не сменят папку.
   useEffect(() => {
-    if (!cwd || !wrapRef.current || termRef.current) return
+    if (!cwd || !wrapRef.current || !hostRef.current || termRef.current) return
+    const m0 = ocDensity(editor.getZoomLevel())
     const term = new Terminal({
-      fontFamily: NODE_MONO,
-      fontSize: 12,
-      lineHeight: 1.2,
+      fontFamily: OC_TERM_FONT,
+      fontSize: OC_FONT_SIZE * m0, // рендерим в m0× плотности, наружу ужмём scale(1/m0)
+      lineHeight: 1, // целочисленный — иначе строки в DOM-рендерере накапливают сдвиг
       theme: OC_THEME,
       cursorBlink: true,
       scrollback: 5000,
@@ -2934,7 +3102,7 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
     })
     const fit = new FitAddon()
     term.loadAddon(fit)
-    term.open(wrapRef.current)
+    term.open(hostRef.current)
     termRef.current = term
     fitRef.current = fit
 
@@ -2951,21 +3119,46 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
     })
 
     const boot = requestAnimationFrame(() => {
-      try {
-        fit.fit()
-      } catch {
-        /* контейнер ещё без размера */
+      // Возврат ноды на экран → восстанавливаем прежнюю сетку (без пере-фита), иначе
+      // фит на другом зуме даст другой размер и реплей буфера «поедет».
+      const saved = ocTermSizes.get(id)
+      if (saved) {
+        try {
+          term.resize(saved.cols, saved.rows)
+        } catch {
+          /* ignore */
+        }
+      } else {
+        try {
+          fit.fit()
+        } catch {
+          /* контейнер ещё без размера */
+        }
+        ocTermSizes.set(id, { cols: term.cols, rows: term.rows })
       }
       window.flow.ptyStart({ id, cwd, cols: term.cols, rows: term.rows, autostart: true }).then((r) => {
         if (r.ok) setAlive(true)
       })
     })
 
-    const ro = new ResizeObserver(() => {
+    // Рефитим ТОЛЬКО при реальном изменении логического размера ноды. contentRect
+    // ResizeObserver — в CSS-пикселях, независимых от зума (в отличие от fit по DOM),
+    // поэтому зум/ремаунт сетку не трогают, а ручной ресайз ноды — трогает.
+    let lastW = Math.round(wrapRef.current.clientWidth)
+    let lastH = Math.round(wrapRef.current.clientHeight)
+    const ro = new ResizeObserver((entries) => {
       const t = termRef.current
       if (!t) return
+      const cr = entries[0]?.contentRect
+      if (!cr) return
+      const w = Math.round(cr.width)
+      const h = Math.round(cr.height)
+      if (w === lastW && h === lastH) return // размер не менялся (напр. первый вызов после ремаунта)
+      lastW = w
+      lastH = h
       try {
         fit.fit()
+        ocTermSizes.set(id, { cols: t.cols, rows: t.rows })
         window.flow.ptyResize({ id, cols: t.cols, rows: t.rows })
       } catch {
         /* ignore */
@@ -2984,6 +3177,22 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
       // pty НЕ убиваем: сессия должна пережить уход ноды за экран и вернуться.
     }
   }, [cwd, id])
+
+  // Зум холста сменил «ступень» плотности → перерисовываем терминал крупнее/мельче.
+  // Сетку cols/rows фиксируем (ресайзим к сохранённой), меняется только пиксельная
+  // плотность ячейки — TUI не «съезжает», а картинка остаётся резкой.
+  useEffect(() => {
+    const t = termRef.current
+    if (!t) return
+    t.options.fontSize = OC_FONT_SIZE * m
+    const saved = ocTermSizes.get(id)
+    try {
+      if (saved) t.resize(saved.cols, saved.rows)
+      else fitRef.current?.fit()
+    } catch {
+      /* контейнер без размера */
+    }
+  }, [m, id])
 
   // Снимок терминала в реестр — чтобы связанный стрелкой ИИ-чат мог взять контекст.
   useEffect(() => {
@@ -3024,6 +3233,7 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
       if (!term) return
       try {
         fitRef.current?.fit()
+        ocTermSizes.set(id, { cols: term.cols, rows: term.rows })
       } catch {
         /* ignore */
       }
@@ -3088,7 +3298,9 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
   return (
     <div
       onPointerDown={stopEventPropagation}
-      onWheelCapture={stopEventPropagation}
+      // Колесо гасим в BUBBLE-фазе (не capture): сначала его получит xterm внутри
+      // (проскроллит терминал/TUI), и только потом мы не даём холсту зумить.
+      onWheel={stopEventPropagation}
       style={{ display: 'flex', flexDirection: 'column', gap: 6, height: '100%', fontFamily: NODE_MONO }}
     >
       {/* Тулбар */}
@@ -3137,7 +3349,8 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
         </OcToolBtn>
       </div>
 
-      {/* Сам терминал */}
+      {/* Сам терминал. Внешний div — реальный размер (за ним следит ResizeObserver),
+          внутренний host рендерится в k× плотности и ужимается scale(1/k) → резко. */}
       <div
         ref={wrapRef}
         className="flow-scroll"
@@ -3154,7 +3367,17 @@ function OpencodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
           borderRadius: 8,
           padding: 6
         }}
-      />
+      >
+        <div
+          ref={hostRef}
+          style={{
+            width: `${m * 100}%`,
+            height: `${m * 100}%`,
+            transform: m === 1 ? undefined : `scale(${1 / m})`,
+            transformOrigin: '0 0'
+          }}
+        />
+      </div>
     </div>
   )
 }
@@ -3355,16 +3578,48 @@ const anyBtnStyle: React.CSSProperties = {
 // ноде через <webview> — воркспейс на доске, а не в браузере. Сервером управляет
 // главный процесс (src/main/openscience.ts). Модели/ключи настраиваются в самом
 // веб-интерфейсе воркспейса. Требует `npm i -g @synsci/openscience`.
-type OsState = { phase: string; message: string; running: boolean; url: string; error: string }
+type OsState = { phase: string; message: string; running: boolean; url: string; error: string; cwd?: string }
 
 function OpenscienceBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
-  void editor
+  const update = useUpdate(editor, shape)
   const id = String(shape.id)
   const [st, setSt] = useState<OsState | null>(null)
   const [progress, setProgress] = useState('')
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const wvRef = useRef<any>(null)
   const started = useRef(false)
+  // Папка-проект openscience: сессии/чаты привязаны к ней (worktree). Пустая =
+  // домашняя папка. Сохраняем в extra, чтобы нода помнила выбранный проект.
+  let osEx: { cwd?: string } = {}
+  try {
+    osEx = JSON.parse(shape.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const exCwd = osEx.cwd || ''
+  const cwdRef = useRef(exCwd)
+  cwdRef.current = exCwd
+  const folderLabel = exCwd ? exCwd.split(/[\\/]/).slice(-1)[0] : 'домашняя папка'
+
+  // Выбрать папку-проект и (пере)запустить сервер в ней → появятся чаты этого проекта.
+  const pickProject = async (): Promise<void> => {
+    const r = await window.flow.pickFolder()
+    if (!r.ok) return
+    update({ extra: JSON.stringify({ ...osEx, cwd: r.path }) })
+    cwdRef.current = r.path
+    started.current = true
+    setProgress('Переключаю проект…')
+    setSt((s) => (s ? { ...s, running: false, phase: 'starting' } : s))
+    await window.flow.openscienceEnsure({ cwd: r.path })
+    // сервер перезапущен в новой папке — перезагружаем webview на её проект
+    setTimeout(() => {
+      try {
+        wvRef.current?.reload()
+      } catch {
+        /* ignore */
+      }
+    }, 900)
+  }
 
   // Снимок воркспейса (innerText webview) в реестр — для контекста по стрелке.
   useEffect(() => {
@@ -3391,7 +3646,7 @@ function OpenscienceBody({ shape, editor }: { shape: FlowNodeShape; editor: Edit
         // Сервер поднимаем автоматически один раз, если он ещё не запущен.
         if (!s.running && !started.current && s.phase !== 'error' && s.phase !== 'starting') {
           started.current = true
-          window.flow.openscienceEnsure()
+          window.flow.openscienceEnsure({ cwd: cwdRef.current || undefined })
         }
       })
     }
@@ -3411,7 +3666,7 @@ function OpenscienceBody({ shape, editor }: { shape: FlowNodeShape; editor: Edit
   const start = (): void => {
     started.current = true
     setProgress('Запускаю…')
-    window.flow.openscienceEnsure()
+    window.flow.openscienceEnsure({ cwd: cwdRef.current || undefined })
   }
 
   // Сервер поднят → показываем веб-воркспейс OpenScience в webview
@@ -3446,8 +3701,16 @@ function OpenscienceBody({ shape, editor }: { shape: FlowNodeShape; editor: Edit
           >
             ↻
           </button>
-          <div style={{ flex: 1, fontSize: 10.5, fontFamily: NODE_MONO, color: C.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-            OpenScience · {st.url.replace(/^https?:\/\//, '')}
+          <button
+            onClick={pickProject}
+            onPointerDown={stopEventPropagation}
+            style={{ ...osciNavBtn, width: 'auto', padding: '0 8px', maxWidth: 150, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={`Проект (папка): ${exCwd || 'домашняя папка'}. Клик — выбрать другую папку-проект.`}
+          >
+            📁 {folderLabel}
+          </button>
+          <div style={{ flex: 1, fontSize: 10.5, fontFamily: NODE_MONO, color: C.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
+            {st.url.replace(/^https?:\/\//, '')}
           </div>
           <button
             onClick={() => {
@@ -3525,8 +3788,16 @@ function OpenscienceBody({ shape, editor }: { shape: FlowNodeShape; editor: Edit
         <>
           <div style={{ fontSize: 12.5, color: C.text }}>OpenScience — научный AI-воркбенч</div>
           <div style={{ fontSize: 11, color: C.textDim, maxWidth: 300, lineHeight: 1.5 }}>
-            Воркспейс откроется прямо здесь, на доске.
+            Воркспейс откроется прямо здесь, на доске. Чаты привязаны к папке-проекту.
           </div>
+          <button
+            onClick={pickProject}
+            onPointerDown={stopEventPropagation}
+            style={{ ...osciNavBtn, width: 'auto', height: 'auto', padding: '5px 10px', fontSize: 11, maxWidth: 300, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}
+            title={exCwd || 'домашняя папка'}
+          >
+            📁 проект: {folderLabel}
+          </button>
           <button onClick={start} onPointerDown={stopEventPropagation} style={osciBtnStyle}>
             ▶ Открыть воркспейс
           </button>
@@ -4741,6 +5012,2542 @@ const pdfBtn: React.CSSProperties = {
   cursor: 'pointer'
 }
 
+// ============================================================================
+// Мета-нода Оркестратора. Запускает движок (main/orchestrator) и в реальном
+// времени показывает дерево подзадач со статусами, ленту трейса, бар бюджета и
+// карточки human-review. Рантайм-состояние — в React-state (как agentTranscripts):
+// в props шейпа оно не пишется, чтобы не раздувать undo/сохранение.
+// ============================================================================
+type OTask = {
+  id: string
+  description: string
+  deps: string[]
+  mode: string
+  success_criteria: string
+  size: string
+}
+type OStatus = { projectId: string; task_id: string; status: string; mode?: string; summary?: string }
+type OTrace = {
+  task_id: string
+  node_id: string
+  mode: string
+  input_refs: string[]
+  output_ref: string
+  cost: { tokens: number; calls: number }
+  duration_ms: number
+  note?: string
+}
+type OHuman = { request_id: string; task_id: string; reason: string; best_summary: string }
+
+const STATUS_META: Record<string, { color: string; label: string }> = {
+  pending: { color: C.textDim, label: 'ожидает' },
+  running: { color: C.blue, label: 'выполняется' },
+  success: { color: '#4ADE80', label: 'готово' },
+  partial: { color: '#FBBF24', label: 'частично' },
+  failure: { color: '#F87171', label: 'провал' },
+  needs_human_review: { color: '#A78BFA', label: 'нужно решение' }
+}
+const MODE_LABEL: Record<string, string> = {
+  pipeline: 'Pipeline',
+  actor_critic: 'Actor-Critic',
+  council: 'Council',
+  ensemble: 'Ensemble',
+  recursive: 'Recursive',
+  planner: 'Planner'
+}
+
+// Слои DAG (longest-path) — для раскладки нод оверлея по колонкам.
+function computeLayers(tasks: OTask[]): Map<string, number> {
+  const byId = new Map(tasks.map((t) => [t.id, t]))
+  const memo = new Map<string, number>()
+  const layer = (id: string, stack: Set<string>): number => {
+    if (memo.has(id)) return memo.get(id)!
+    const t = byId.get(id)
+    if (!t || !t.deps.length) {
+      memo.set(id, 0)
+      return 0
+    }
+    if (stack.has(id)) return 0 // защита от цикла
+    stack.add(id)
+    let m = 0
+    for (const d of t.deps) m = Math.max(m, 1 + layer(d, stack))
+    stack.delete(id)
+    memo.set(id, m)
+    return m
+  }
+  const out = new Map<string, number>()
+  for (const t of tasks) out.set(t.id, layer(t.id, new Set()))
+  return out
+}
+
+// Найти ноду-подзадачу оверлея по проекту+taskId.
+function findOrchTaskShape(editor: Editor, projectId: string, taskId: string): FlowNodeShape | undefined {
+  return editor.getCurrentPageShapes().find((s) => {
+    if (s.type !== 'flow-node') return false
+    const p = (s as FlowNodeShape).props
+    if (p.kind !== 'orchtask') return false
+    try {
+      const e = JSON.parse(p.extra || '{}')
+      return e.orchProject === projectId && e.taskId === taskId
+    } catch {
+      return false
+    }
+  }) as FlowNodeShape | undefined
+}
+
+// Удалить прошлый оверлей этой мета-ноды (ноды подзадач + вызовов + стрелки).
+function clearOverlay(editor: Editor, metaId: string): void {
+  const ids = editor
+    .getCurrentPageShapes()
+    .filter((s) => {
+      if (s.type !== 'flow-node') return false
+      const p = (s as FlowNodeShape).props
+      if (p.kind !== 'orchtask' && p.kind !== 'orchcall') return false
+      try {
+        return JSON.parse(p.extra || '{}').orchMeta === metaId
+      } catch {
+        return false
+      }
+    })
+    .map((s) => s.id)
+  if (!ids.length) return
+  const arrows = new Set<string>()
+  for (const id of ids) {
+    try {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      for (const b of (editor as any).getBindingsToShape(id, 'arrow')) arrows.add(b.fromId)
+    } catch {
+      /* API отличается */
+    }
+  }
+  editor.deleteShapes([...arrows, ...ids] as never)
+}
+
+// Создать canvas-оверлей. Раскладка «дорожками»: каждая подзадача — своя строка
+// (слева направо по слоям DAG для порядка), а её вызовы ролей вырастают ВПРАВО в
+// той же строке (см. addCallNode) — так вызовам всегда хватает места, без коллизий.
+function createOverlay(editor: Editor, metaId: string, projectId: string, tasks: OTask[]): void {
+  const meta = editor.getShape<FlowNodeShape>(metaId as never)
+  if (!meta) return
+  const mx = meta.x
+  const my = meta.y
+  const mw = meta.props.w
+  const NW = 232
+  const NH = 148
+  const ROWGAP = 46
+  // Порядок строк: по слою DAG, затем по исходному порядку (зависимости выше).
+  const layers = computeLayers(tasks)
+  const ordered = [...tasks].sort((a, b) => (layers.get(a.id)! - layers.get(b.id)!) || 0)
+  const idOf = new Map<string, string>()
+  const subX = mx + mw + 110
+  ordered.forEach((t, i) => {
+    const sid = createShapeId()
+    idOf.set(t.id, sid)
+    editor.createShape<FlowNodeShape>({
+      id: sid,
+      type: 'flow-node',
+      x: subX,
+      y: my + i * (NH + ROWGAP),
+      props: {
+        kind: 'orchtask',
+        title: t.id,
+        body: t.description,
+        w: NW,
+        h: NH,
+        extra: JSON.stringify({
+          orchProject: projectId,
+          orchMeta: metaId,
+          taskId: t.id,
+          mode: t.mode,
+          status: 'pending',
+          deps: t.deps,
+          size: t.size,
+          success: t.success_criteria,
+          callCount: 0,
+          lastCallId: ''
+        })
+      }
+    })
+  })
+  // Стрелки зависимостей между подзадачами (строками); входы — от мета-ноды.
+  for (const t of tasks) {
+    const to = idOf.get(t.id)
+    if (!to) continue
+    if (t.deps.length) {
+      for (const d of t.deps) {
+        const from = idOf.get(d)
+        if (from) connectArrow(editor, from, to)
+      }
+    } else {
+      connectArrow(editor, metaId, to)
+    }
+  }
+}
+
+// Добавить ноду-вызов роли в дорожку своей подзадачи (по приходу трейса).
+// Вызовы выстраиваются в цепочку вправо: подзадача → вызов0 → вызов1 → …
+function addCallNode(editor: Editor, metaId: string, projectId: string, entry: OTrace): void {
+  const sub = findOrchTaskShape(editor, projectId, entry.task_id)
+  if (!sub) return // трейс планировщика / чужой ветки / оверлей выключен
+  let e: Record<string, unknown> = {}
+  try {
+    e = JSON.parse(sub.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const idx = (e.callCount as number) || 0
+  const lastId = (e.lastCallId as string) || ''
+  const CW = 200
+  const CH = 132
+  const GAPX = 30
+  const cx = sub.x + sub.props.w + 46 + idx * (CW + GAPX)
+  const cy = sub.y + (sub.props.h - CH) / 2
+  const sid = createShapeId()
+  editor.createShape<FlowNodeShape>({
+    id: sid,
+    type: 'flow-node',
+    x: cx,
+    y: cy,
+    props: {
+      kind: 'orchcall',
+      title: entry.node_id,
+      body: entry.note || '',
+      w: CW,
+      h: CH,
+      extra: JSON.stringify({
+        orchProject: projectId,
+        orchMeta: metaId,
+        taskId: entry.task_id,
+        callIndex: idx,
+        node_id: entry.node_id,
+        mode: entry.mode,
+        note: entry.note,
+        outputRef: entry.output_ref,
+        inputRefs: entry.input_refs,
+        cost: entry.cost,
+        duration: entry.duration_ms
+      })
+    }
+  })
+  connectArrow(editor, lastId || sub.id, sid)
+  // Накопить агрегат на ноде подзадачи + запомнить последний вывод/контекст.
+  const prev = (e.cost as { tokens: number; calls: number }) || { tokens: 0, calls: 0 }
+  editor.updateShape<FlowNodeShape>({
+    id: sub.id,
+    type: 'flow-node',
+    props: {
+      extra: JSON.stringify({
+        ...e,
+        callCount: idx + 1,
+        lastCallId: sid,
+        outputRef: entry.output_ref || e.outputRef,
+        inputRefs: entry.input_refs && entry.input_refs.length ? entry.input_refs : e.inputRefs,
+        cost: { tokens: prev.tokens + (entry.cost?.tokens || 0), calls: prev.calls + (entry.cost?.calls || 0) }
+      })
+    }
+  })
+}
+
+// Пропатчить extra ноды-подзадачи (live-статус / стоимость / ссылки Vault).
+function patchOrchTask(editor: Editor, projectId: string, taskId: string, patch: Record<string, unknown>): void {
+  const sh = findOrchTaskShape(editor, projectId, taskId)
+  if (!sh) return
+  let e: Record<string, unknown> = {}
+  try {
+    e = JSON.parse(sh.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  editor.updateShape<FlowNodeShape>({ id: sh.id, type: 'flow-node', props: { extra: JSON.stringify({ ...e, ...patch }) } })
+}
+
+function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
+  const update = useUpdate(editor, shape)
+  const { body, model } = shape.props
+  let ex: {
+    projectId?: string
+    project_token_budget?: number
+    max_recursion_depth?: number
+    max_iterations_per_mode?: number
+    max_parallel_nodes?: number
+  } = {}
+  try {
+    ex = JSON.parse(shape.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const setEx = (patch: Record<string, unknown>) => update({ extra: JSON.stringify({ ...ex, ...patch }) })
+  const budgetLimit = ex.project_token_budget ?? 200000
+  const maxDepth = ex.max_recursion_depth ?? 4
+  const maxIter = ex.max_iterations_per_mode ?? 5
+  const maxParallel = ex.max_parallel_nodes ?? 3
+  const overlayOn = (ex as { canvasOverlay?: boolean }).canvasOverlay !== false // по умолчанию вкл.
+  const overlayEnabledRef = useRef(overlayOn)
+  overlayEnabledRef.current = overlayOn
+  const overlayForRef = useRef('')
+
+  const [running, setRunning] = useState(false)
+  const [projectId, setProjectId] = useState<string>(ex.projectId || '')
+  const projectRef = useRef(projectId)
+  projectRef.current = projectId
+  const [tasks, setTasks] = useState<OTask[]>([])
+  const [statuses, setStatuses] = useState<Record<string, OStatus>>({})
+  const [traces, setTraces] = useState<OTrace[]>([])
+  const [humans, setHumans] = useState<OHuman[]>([])
+  const [rootDone, setRootDone] = useState<string>('')
+  const [spent, setSpent] = useState(0)
+  const [showTrace, setShowTrace] = useState(true)
+
+  // Подписки на события движка (один раз). Фильтруем по текущему projectId.
+  useEffect(() => {
+    const mine = (pid: string) => pid === projectRef.current
+    const offStatus = window.flow.onOrchStatus((m: OStatus) => {
+      if (!mine(m.projectId)) return
+      if (m.task_id === '__tree__') {
+        if ((m.depth || 0) > 0) return // дерево саб-оркестратора не перезатирает родительское
+        try {
+          const parsed = JSON.parse(m.summary || '[]') as OTask[]
+          setTasks(parsed)
+          // Canvas-оверлей: создаём ноды подзадач по слоям DAG (один раз на проект).
+          if (overlayEnabledRef.current && overlayForRef.current !== projectRef.current) {
+            overlayForRef.current = projectRef.current
+            try {
+              createOverlay(editor, shape.id, projectRef.current, parsed)
+            } catch {
+              /* холст мог измениться — не критично */
+            }
+          }
+        } catch {
+          /* ignore */
+        }
+        return
+      }
+      if (m.task_id === '__budget__') return // алерты бюджета отражаются через spent-бар
+      setStatuses((s) => ({ ...s, [m.task_id]: m }))
+      patchOrchTask(editor, m.projectId, m.task_id, { status: m.status, ...(m.mode ? { mode: m.mode } : {}) })
+    })
+    const offTrace = window.flow.onOrchTrace((m: { projectId: string; entry: OTrace }) => {
+      if (!mine(m.projectId)) return
+      setTraces((t) => [m.entry, ...t].slice(0, 200))
+      setSpent((v) => v + (m.entry.cost?.tokens || 0))
+      // Оверлей вызовов ролей: каждый трейс = отдельная нода-вызов в дорожке
+      // своей подзадачи (+ накопление стоимости/ссылок на ноде подзадачи).
+      if (overlayEnabledRef.current) {
+        try {
+          addCallNode(editor, shape.id, m.projectId, m.entry)
+        } catch {
+          /* холст мог измениться */
+        }
+      }
+    })
+    const offDone = window.flow.onOrchDone((m: { projectId: string; result: { status: string; summary: string } }) => {
+      if (!mine(m.projectId)) return
+      setRunning(false)
+      setRootDone(`${STATUS_META[m.result.status]?.label ?? m.result.status}: ${m.result.summary}`)
+    })
+    const offHuman = window.flow.onOrchHumanRequest((m: OHuman & { project_id: string }) => {
+      if (!mine(m.project_id)) return
+      setHumans((h) => [...h, { request_id: m.request_id, task_id: m.task_id, reason: m.reason, best_summary: m.best_summary }])
+    })
+    return () => {
+      offStatus()
+      offTrace()
+      offDone()
+      offHuman()
+    }
+  }, [])
+
+  const start = async () => {
+    const goal = (body || '').trim()
+    if (!goal) return
+    // Убрать прошлый canvas-оверлей этой мета-ноды перед новым прогоном.
+    try {
+      clearOverlay(editor, shape.id)
+    } catch {
+      /* ignore */
+    }
+    overlayForRef.current = ''
+    setRunning(true)
+    setTasks([])
+    setStatuses({})
+    setTraces([])
+    setHumans([])
+    setRootDone('')
+    setSpent(0)
+    // Контекст = всё, что соединено стрелкой с нодой-оркестратором (в любую
+    // сторону): заметки, документы, ответы ИИ, ноутбуки, транскрипты агент-нод.
+    // Собираем ПОСЛЕ clearOverlay, чтобы не втянуть собственные оверлей-ноды.
+    const ctxParts = gatherChatContext(editor, shape.id, ORCH_SKIP_KINDS)
+    const materials = ctxParts.join('\n\n---\n\n')
+    const res = await window.flow.orchStart({
+      goal,
+      model,
+      materials: materials || undefined,
+      budget: {
+        project_token_budget: budgetLimit,
+        max_recursion_depth: maxDepth,
+        max_iterations_per_mode: maxIter,
+        max_parallel_nodes: maxParallel
+      }
+    })
+    if (res.ok && res.projectId) {
+      setProjectId(res.projectId)
+      projectRef.current = res.projectId
+      setEx({ projectId: res.projectId })
+    } else {
+      setRunning(false)
+      setRootDone(`Ошибка запуска: ${res.error || 'неизвестно'}`)
+    }
+  }
+
+  const cancel = async () => {
+    if (projectId) await window.flow.orchCancel({ projectId })
+    setRunning(false)
+  }
+
+  const decide = async (req: OHuman, decision: 'approve' | 'reject' | 'edit', feedback?: string) => {
+    await window.flow.orchHumanDecision({ projectId, requestId: req.request_id, decision: { decision, feedback } })
+    setHumans((h) => h.filter((x) => x.request_id !== req.request_id))
+  }
+
+  const frac = Math.min(1, spent / Math.max(1, budgetLimit))
+  const barColor = frac >= 1 ? '#F87171' : frac >= 0.8 ? '#FBBF24' : C.blue
+  const numStyle = { ...fieldStyle, width: 72, padding: '4px 6px', fontSize: 11.5 } as const
+  // Живой счётчик нод, подключённых стрелкой (их содержимое пойдёт в контекст).
+  const connectedCount = gatherChatContext(editor, shape.id, ORCH_SKIP_KINDS).length
+
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%', overflow: 'hidden' }}
+    >
+      <ModelSelect value={model} onChange={(v) => update({ model: v })} />
+
+      <textarea
+        className="flow-input flow-scroll"
+        value={body}
+        onChange={(e) => update({ body: e.currentTarget.value })}
+        placeholder="🕸 Опиши проект целиком — планировщик разобьёт его на подзадачи и выберет режимы…"
+        style={{ ...fieldStyle, minHeight: 52, maxHeight: 90, resize: 'none', lineHeight: 1.4 }}
+      />
+
+      {/* Бюджеты и лимиты */}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 11, color: C.textDim }}>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          токены
+          <input
+            type="number"
+            value={budgetLimit}
+            onChange={(e) => setEx({ project_token_budget: Number(e.currentTarget.value) || 0 })}
+            style={numStyle}
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          глубина
+          <input
+            type="number"
+            value={maxDepth}
+            onChange={(e) => setEx({ max_recursion_depth: Number(e.currentTarget.value) || 1 })}
+            style={{ ...numStyle, width: 48 }}
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          итер.
+          <input
+            type="number"
+            value={maxIter}
+            onChange={(e) => setEx({ max_iterations_per_mode: Number(e.currentTarget.value) || 1 })}
+            style={{ ...numStyle, width: 48 }}
+          />
+        </label>
+        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+          паралл.
+          <input
+            type="number"
+            value={maxParallel}
+            onChange={(e) => setEx({ max_parallel_nodes: Number(e.currentTarget.value) || 1 })}
+            style={{ ...numStyle, width: 48 }}
+          />
+        </label>
+      </div>
+
+      {/* Контекст по стрелкам: сколько нод подхватится в материалы оркестрации */}
+      <div
+        style={{ fontSize: 11, color: connectedCount ? '#4ADE80' : C.textDim }}
+        title="Соедини ноды стрелкой с оркестратором — их содержимое станет контекстом"
+      >
+        🔗 Контекст: {connectedCount ? `${connectedCount} нод по стрелкам` : 'нет (соедини ноды стрелкой)'}
+      </div>
+
+      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textDim, cursor: 'pointer' }}>
+        <input
+          type="checkbox"
+          checked={overlayOn}
+          onChange={(e) => setEx({ canvasOverlay: e.currentTarget.checked })}
+        />
+        🗺 Разложить подзадачи нодами на холсте
+      </label>
+
+      <button
+        className="flow-run-btn"
+        onClick={running ? cancel : start}
+        style={{
+          cursor: 'pointer',
+          border: 'none',
+          borderRadius: 10,
+          padding: '8px 10px',
+          fontSize: 13,
+          fontWeight: 600,
+          color: '#0E0F12',
+          background: running ? '#F87171' : KINDS.orchestrator.grad
+        }}
+      >
+        {running ? '■ Отмена' : '▶ Запустить оркестрацию'}
+      </button>
+
+      {/* Бар бюджета */}
+      <div>
+        <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: 10.5, color: C.textDim, marginBottom: 3 }}>
+          <span>бюджет</span>
+          <span>
+            {spent.toLocaleString('ru')} / {budgetLimit.toLocaleString('ru')} ток. ({Math.round(frac * 100)}%)
+          </span>
+        </div>
+        <div style={{ height: 6, background: C.field, borderRadius: 4, overflow: 'hidden' }}>
+          <div style={{ width: `${frac * 100}%`, height: '100%', background: barColor, transition: 'width .3s' }} />
+        </div>
+      </div>
+
+      {/* Human-in-the-loop */}
+      {humans.map((req) => (
+        <div
+          key={req.request_id}
+          style={{
+            border: `1px solid #A78BFA`,
+            borderRadius: 10,
+            padding: 8,
+            background: 'rgba(167,139,250,0.08)',
+            fontSize: 11.5
+          }}
+        >
+          <div style={{ color: '#A78BFA', fontWeight: 600, marginBottom: 3 }}>
+            ✋ Нужно решение · {req.task_id}
+          </div>
+          <div style={{ color: C.textDim, marginBottom: 6 }}>{req.reason}</div>
+          <div style={{ color: C.text, marginBottom: 6, maxHeight: 60, overflow: 'auto' }}>{req.best_summary}</div>
+          <div style={{ display: 'flex', gap: 6 }}>
+            <button onClick={() => decide(req, 'approve')} style={smallBtn('#4ADE80')}>
+              Принять
+            </button>
+            <button onClick={() => decide(req, 'reject')} style={smallBtn('#F87171')}>
+              Отклонить
+            </button>
+            <button
+              onClick={() => {
+                const fb = window.prompt('Что исправить?') || ''
+                decide(req, 'edit', fb)
+              }}
+              style={smallBtn(C.blue)}
+            >
+              Правка
+            </button>
+          </div>
+        </div>
+      ))}
+
+      {/* Дерево подзадач */}
+      <div className="flow-scroll" style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 5 }}>
+        {tasks.map((t) => {
+          const st = statuses[t.id]?.status || 'pending'
+          const meta = STATUS_META[st] || STATUS_META.pending
+          return (
+            <div
+              key={t.id}
+              style={{
+                border: `1px solid ${C.border}`,
+                borderLeft: `3px solid ${meta.color}`,
+                borderRadius: 8,
+                padding: '6px 8px',
+                background: C.field
+              }}
+            >
+              <div style={{ display: 'flex', justifyContent: 'space-between', gap: 6, alignItems: 'center' }}>
+                <span style={{ fontSize: 12, color: C.text, fontWeight: 500 }}>{t.description}</span>
+                <span style={{ fontSize: 10, color: meta.color, whiteSpace: 'nowrap' }}>{meta.label}</span>
+              </div>
+              <div style={{ fontSize: 10, color: C.textDim, marginTop: 2 }}>
+                {MODE_LABEL[statuses[t.id]?.mode || t.mode] || t.mode}
+                {t.deps.length ? ` · зависит: ${t.deps.join(', ')}` : ''}
+                {t.size === 'large' ? ' · крупная' : ''}
+              </div>
+            </div>
+          )
+        })}
+        {!tasks.length && (
+          <div style={{ fontSize: 11, color: C.textDim, textAlign: 'center', marginTop: 10 }}>
+            {running ? 'Планировщик декомпозирует проект…' : 'Опиши проект и запусти оркестрацию.'}
+          </div>
+        )}
+      </div>
+
+      {rootDone && (
+        <div style={{ fontSize: 11.5, color: C.text, borderTop: `1px solid ${C.border}`, paddingTop: 6 }}>
+          <b>Итог:</b> {rootDone}
+        </div>
+      )}
+
+      {/* Лента трейса */}
+      <div>
+        <div
+          onClick={() => setShowTrace((v) => !v)}
+          style={{ fontSize: 10.5, color: C.textDim, cursor: 'pointer', userSelect: 'none' }}
+        >
+          {showTrace ? '▾' : '▸'} трейс вызовов ({traces.length})
+        </div>
+        {showTrace && traces.length > 0 && (
+          <div className="flow-scroll" style={{ maxHeight: 96, overflow: 'auto', marginTop: 4 }}>
+            {traces.slice(0, 40).map((tr, i) => (
+              <div key={i} style={{ fontSize: 10, color: C.textDim, padding: '1px 0', fontFamily: 'monospace' }}>
+                <span style={{ color: C.blue }}>{MODE_LABEL[tr.mode] || tr.mode}</span> · {tr.node_id} ·{' '}
+                {tr.cost.tokens}ток · {Math.round(tr.duration_ms / 100) / 10}с{tr.note ? ` · ${tr.note}` : ''}
+              </div>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+function smallBtn(color: string) {
+  return {
+    flex: 1,
+    border: `1px solid ${color}`,
+    background: 'transparent',
+    color,
+    borderRadius: 8,
+    padding: '4px 6px',
+    fontSize: 11,
+    cursor: 'pointer'
+  } as const
+}
+
+// Узел подзадачи на холсте (canvas-оверлей дерева вызовов). Read-only: создаётся
+// оркестратором, отражает live-статус, позволяет посмотреть контекст/вывод из Vault.
+type OTaskExtra = {
+  orchProject?: string
+  orchMeta?: string
+  taskId?: string
+  mode?: string
+  status?: string
+  deps?: string[]
+  size?: string
+  success?: string
+  outputRef?: string
+  inputRefs?: string[]
+  cost?: { tokens: number; calls: number }
+  note?: string
+  node_id?: string
+  duration?: number
+  callIndex?: number
+  callCount?: number
+}
+
+// Просмотр Vault по ссылкам (вывод/контекст узла). Общий для orchtask и orchcall.
+function VaultPeek({ outputRef, inputRefs }: { outputRef?: string; inputRefs?: string[] }) {
+  const [view, setView] = useState<'none' | 'output' | 'context'>('none')
+  const [text, setText] = useState('')
+  const [loading, setLoading] = useState(false)
+
+  const open = async (kind: 'output' | 'context') => {
+    if (view === kind) {
+      setView('none')
+      return
+    }
+    setView(kind)
+    setLoading(true)
+    setText('')
+    try {
+      if (kind === 'output') {
+        const r = outputRef ? await window.flow.orchVaultRead({ key: outputRef }) : { ok: false as const, content: null }
+        setText((r.ok && r.content) || '(вывод ещё не записан)')
+      } else {
+        const keys = inputRefs || []
+        if (!keys.length) setText('(контекст пуст — без входных ссылок)')
+        else {
+          const parts: string[] = []
+          for (const k of keys) {
+            const r = await window.flow.orchVaultRead({ key: k })
+            parts.push(`# ${k}\n${(r.ok && r.content) || '(нет)'}`)
+          }
+          setText(parts.join('\n\n'))
+        }
+      }
+    } catch (e) {
+      setText(`Ошибка чтения Vault: ${String(e)}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <>
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button onClick={() => open('output')} style={smallBtn(view === 'output' ? '#4ADE80' : C.textDim)}>
+          👁 вывод
+        </button>
+        <button onClick={() => open('context')} style={smallBtn(view === 'context' ? C.blue : C.textDim)}>
+          🧩 контекст
+        </button>
+      </div>
+      {view !== 'none' && (
+        <div
+          className="flow-scroll"
+          style={{
+            flex: 1,
+            overflow: 'auto',
+            fontSize: 10.5,
+            color: C.text,
+            background: C.field,
+            border: `1px solid ${C.border}`,
+            borderRadius: 8,
+            padding: 6,
+            whiteSpace: 'pre-wrap',
+            fontFamily: view === 'context' ? 'monospace' : 'inherit'
+          }}
+        >
+          {loading ? '…' : text}
+        </div>
+      )}
+    </>
+  )
+}
+
+function OrchTaskBody({ shape }: { shape: FlowNodeShape; editor: Editor }) {
+  let ex: OTaskExtra = {}
+  try {
+    ex = JSON.parse(shape.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const status = ex.status || 'pending'
+  const meta = STATUS_META[status] || STATUS_META.pending
+
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      style={{ display: 'flex', flexDirection: 'column', gap: 5, height: '100%', overflow: 'hidden' }}
+    >
+      {/* Статус-полоса */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+        <span style={{ width: 9, height: 9, borderRadius: 5, background: meta.color, flex: '0 0 auto' }} />
+        <span style={{ fontSize: 11, color: meta.color, fontWeight: 600 }}>{meta.label}</span>
+        <span style={{ marginLeft: 'auto', fontSize: 10, color: C.textDim }}>
+          {MODE_LABEL[ex.mode || ''] || ex.mode}
+          {ex.size === 'large' ? ' · крупная' : ''}
+        </span>
+      </div>
+
+      <div style={{ fontSize: 12, color: C.text, lineHeight: 1.35, maxHeight: 54, overflow: 'auto' }}>
+        {shape.props.body}
+      </div>
+
+      <div style={{ fontSize: 10, color: C.textDim }}>
+        {shape.props.title}
+        {ex.deps && ex.deps.length ? ` · ← ${ex.deps.join(', ')}` : ' · вход'}
+        {ex.cost ? ` · ${ex.cost.tokens}ток/${ex.cost.calls}выз` : ''}
+        {ex.callCount ? ` · ${ex.callCount} вызовов →` : ''}
+      </div>
+
+      <VaultPeek outputRef={ex.outputRef} inputRefs={ex.inputRefs} />
+    </div>
+  )
+}
+
+// Нода отдельного вызова роли (actor/critic/мнение совета/кандидат/делегация).
+function OrchCallBody({ shape }: { shape: FlowNodeShape }) {
+  let ex: OTaskExtra = {}
+  try {
+    ex = JSON.parse(shape.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const dur = ex.duration ? `${Math.round(ex.duration / 100) / 10}с` : ''
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      style={{ display: 'flex', flexDirection: 'column', gap: 4, height: '100%', overflow: 'hidden' }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
+        <span style={{ width: 8, height: 8, borderRadius: 4, background: '#38BDF8', flex: '0 0 auto' }} />
+        <span style={{ fontSize: 11, color: C.text, fontWeight: 600, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {ex.node_id || shape.props.title}
+        </span>
+      </div>
+      <div style={{ fontSize: 10, color: '#38BDF8' }}>
+        {MODE_LABEL[ex.mode || ''] || ex.mode}
+        {ex.cost ? ` · ${ex.cost.tokens}ток` : ''}
+        {dur ? ` · ${dur}` : ''}
+      </div>
+      {(ex.note || shape.props.body) && (
+        <div style={{ fontSize: 11, color: C.textDim, lineHeight: 1.3, maxHeight: 34, overflow: 'auto' }}>
+          {ex.note || shape.props.body}
+        </div>
+      )}
+      <VaultPeek outputRef={ex.outputRef} inputRefs={ex.inputRefs} />
+    </div>
+  )
+}
+
+// ================= Нода «Список»: ввод → ИИ по категориям → цветные плашки =========
+type ListGroup = { name: string; items: string[] }
+type ListData = { title: string; groups: ListGroup[] }
+// Палитра категорий — сочные тона, красиво ложатся полупрозрачными плашками на тёмную тему.
+const GROUP_HUES = ['#F59E0B', '#F472B6', '#22D3EE', '#4ADE80', '#A78BFA', '#34D399', '#FB923C', '#60A5FA', '#F87171', '#2DD4BF', '#E879F9', '#FBBF24']
+
+function parseListJson(text: string): ListData | null {
+  try {
+    const m = text.match(/\{[\s\S]*\}/)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw: any = JSON.parse(m ? m[0] : text)
+    const groups: ListGroup[] = (Array.isArray(raw.groups) ? raw.groups : []).map((g: any) => ({
+      name: String(g?.name ?? ''),
+      items: (Array.isArray(g?.items) ? g.items : []).map((x: any) => String(x)).filter(Boolean)
+    }))
+    if (!groups.length) return null
+    return { title: String(raw.title ?? 'Список'), groups }
+  } catch {
+    return null
+  }
+}
+
+function readList(extra: string): ListData {
+  try {
+    const d = JSON.parse(extra || '{}').list
+    if (d && Array.isArray(d.groups)) return d as ListData
+  } catch {
+    /* ignore */
+  }
+  return { title: '', groups: [] }
+}
+
+function spawnListCard(editor: Editor, sourceId: string, data: ListData): void {
+  const bounds = editor.getShapePageBounds(sourceId as never)
+  if (!bounds) return
+  const id = createShapeId()
+  editor.createShape<FlowNodeShape>({
+    id,
+    type: 'flow-node',
+    x: bounds.x,
+    y: bounds.maxY + 70,
+    props: { kind: 'listcard', title: data.title || 'Список', body: '', extra: JSON.stringify({ list: data }), sourceId, w: 940, h: 520 }
+  })
+  editor.updateShape<FlowNodeShape>({ id: sourceId as never, type: 'flow-node', props: { answerId: id } })
+  connectArrow(editor, sourceId, id)
+  editor.select(id)
+}
+
+// ---------- Канбан-доска: колонки + карточки-задачи, перенос между колонками ----------
+type KanbanCard = { id: string; text: string; done?: boolean }
+type KanbanColumn = { id: string; name: string; color: string; limit?: number; cards: KanbanCard[] }
+type KanbanData = { columns: KanbanColumn[] }
+
+// Короткий уникальный id для карточек/колонок (в renderer доступен crypto/Math.random)
+function kbId(): string {
+  try {
+    return crypto.randomUUID().slice(0, 8)
+  } catch {
+    return Math.random().toString(36).slice(2, 10)
+  }
+}
+
+// Стабильные id дефолтных колонок — чтобы пустая доска не пересобирала колонки
+// (и не сбрасывала фокус) на каждом ре-рендере до первого сохранения в props.
+function defaultKanban(): KanbanData {
+  return {
+    columns: [
+      { id: 'todo', name: '📋 Нужно сделать', color: '#F59E0B', cards: [] },
+      { id: 'doing', name: '🟦 В процессе', color: '#60A5FA', limit: 3, cards: [] },
+      { id: 'done', name: '✅ Сделанные', color: '#4ADE80', cards: [] },
+      { id: 'moved', name: '↪️ Перенесено', color: '#A78BFA', cards: [] },
+      { id: 'cancel', name: '❌ Отменено', color: '#F87171', cards: [] }
+    ]
+  }
+}
+
+function readKanban(extra: string): KanbanData {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = JSON.parse(extra || '{}').kanban as any
+    if (d && Array.isArray(d.columns) && d.columns.length) {
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        columns: d.columns.map((c: any) => ({
+          id: String(c?.id ?? kbId()),
+          name: String(c?.name ?? ''),
+          color: String(c?.color ?? '#8B93A3'),
+          limit: typeof c?.limit === 'number' ? c.limit : undefined,
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          cards: (Array.isArray(c?.cards) ? c.cards : []).map((k: any) => ({
+            id: String(k?.id ?? kbId()),
+            text: String(k?.text ?? ''),
+            done: !!k?.done
+          }))
+        }))
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return defaultKanban()
+}
+
+// Доска → читаемый текст (передаётся в ИИ по гибкой стрелке-связи).
+function kanbanToText(data: KanbanData): string {
+  return data.columns
+    .map((c) => {
+      const head = `${c.name} (${c.cards.length}${c.limit ? `/${c.limit}` : ''})`
+      const items = c.cards.length
+        ? c.cards.map((k) => `  - [${k.done ? 'x' : ' '}] ${k.text}`).join('\n')
+        : '  (пусто)'
+      return `${head}:\n${items}`
+    })
+    .join('\n\n')
+}
+
+// Авторастущее поле ввода текста карточки.
+function KanbanCardText({
+  value,
+  onChange,
+  onDone,
+  autoFocus
+}: {
+  value: string
+  onChange: (v: string) => void
+  onDone: () => void
+  autoFocus?: boolean
+}) {
+  const ref = useRef<HTMLTextAreaElement>(null)
+  const grow = (el: HTMLTextAreaElement | null) => {
+    if (!el) return
+    el.style.height = 'auto'
+    el.style.height = el.scrollHeight + 'px'
+  }
+  useEffect(() => {
+    grow(ref.current)
+    if (autoFocus && ref.current) {
+      ref.current.focus()
+      const n = ref.current.value.length
+      ref.current.setSelectionRange(n, n)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+  return (
+    <textarea
+      ref={ref}
+      value={value}
+      draggable={false}
+      onPointerDown={stopEventPropagation}
+      onInput={(e) => grow(e.currentTarget)}
+      onChange={(e) => onChange(e.currentTarget.value)}
+      onKeyDown={(e) => {
+        if (e.key === 'Enter' && !e.shiftKey) {
+          e.preventDefault()
+          onDone()
+        }
+      }}
+      onBlur={onDone}
+      placeholder="Текст задачи…"
+      className="flow-input"
+      style={{
+        width: '100%',
+        resize: 'none',
+        border: 'none',
+        background: 'transparent',
+        color: C.text,
+        font: `500 12px ${NODE_SANS}`,
+        lineHeight: 1.35,
+        padding: 0,
+        outline: 'none',
+        overflow: 'hidden',
+        minHeight: 16
+      }}
+    />
+  )
+}
+
+// Тело канбан-ноды: колонки со скроллом, карточки с переносом (drag&drop),
+// добавление/переименование/удаление колонок и карточек. Всё живёт в props.extra,
+// поэтому работает undo/redo и сохранение доски вместе с холстом.
+function KanbanBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
+  const update = useUpdate(editor, shape)
+  const data = readKanban(shape.props.extra)
+  const cols = data.columns
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [dragCard, setDragCard] = useState<{ colId: string; cardId: string } | null>(null)
+  const [overCol, setOverCol] = useState<string | null>(null)
+
+  const save = (next: KanbanColumn[]) => {
+    const ex = parseExtra(shape.props.extra)
+    update({ extra: JSON.stringify({ ...ex, kanban: { columns: next } }) })
+  }
+  const mutate = (fn: (cols: KanbanColumn[]) => void) => {
+    const next = cols.map((c) => ({ ...c, cards: c.cards.map((k) => ({ ...k })) }))
+    fn(next)
+    save(next)
+  }
+
+  const addCard = (colId: string) => {
+    const id = kbId()
+    mutate((cs) => {
+      const c = cs.find((x) => x.id === colId)
+      if (c) c.cards.push({ id, text: '' })
+    })
+    setEditingId(id)
+  }
+  const editCard = (cardId: string, text: string) =>
+    mutate((cs) => {
+      for (const c of cs) {
+        const k = c.cards.find((x) => x.id === cardId)
+        if (k) k.text = text
+      }
+    })
+  const delCard = (cardId: string) =>
+    mutate((cs) => {
+      for (const c of cs) c.cards = c.cards.filter((k) => k.id !== cardId)
+    })
+  const toggleDone = (cardId: string) =>
+    mutate((cs) => {
+      for (const c of cs) {
+        const k = c.cards.find((x) => x.id === cardId)
+        if (k) k.done = !k.done
+      }
+    })
+  const moveCard = (fromColId: string, cardId: string, toColId: string, beforeCardId?: string) =>
+    mutate((cs) => {
+      const from = cs.find((c) => c.id === fromColId)
+      const to = cs.find((c) => c.id === toColId)
+      if (!from || !to) return
+      const idx = from.cards.findIndex((k) => k.id === cardId)
+      if (idx < 0) return
+      const [card] = from.cards.splice(idx, 1)
+      let at = to.cards.length
+      if (beforeCardId) {
+        const bi = to.cards.findIndex((k) => k.id === beforeCardId)
+        if (bi >= 0) at = bi
+      }
+      to.cards.splice(at, 0, card)
+    })
+
+  const addColumn = () =>
+    mutate((cs) => {
+      cs.push({ id: kbId(), name: 'Новая колонка', color: GROUP_HUES[cs.length % GROUP_HUES.length], cards: [] })
+    })
+  const renameColumn = (colId: string, name: string) =>
+    mutate((cs) => {
+      const c = cs.find((x) => x.id === colId)
+      if (c) c.name = name
+    })
+  const delColumn = (colId: string) => {
+    const c = cols.find((x) => x.id === colId)
+    if (c && c.cards.length && !window.confirm(`Удалить колонку «${c.name}» вместе с ${c.cards.length} карточками?`)) return
+    mutate((cs) => {
+      const i = cs.findIndex((x) => x.id === colId)
+      if (i >= 0) cs.splice(i, 1)
+    })
+  }
+
+  const onDropTo = (toColId: string, beforeCardId?: string) => {
+    if (dragCard) moveCard(dragCard.colId, dragCard.cardId, toColId, beforeCardId)
+    setDragCard(null)
+    setOverCol(null)
+  }
+
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      className="flow-scroll"
+      style={{ display: 'flex', gap: 12, height: '100%', overflowX: 'auto', overflowY: 'hidden', paddingBottom: 6 }}
+    >
+      {cols.map((col) => {
+        const full = col.limit != null && col.cards.length >= col.limit
+        const isOver = overCol === col.id
+        return (
+          <div
+            key={col.id}
+            onDragOver={(e) => {
+              if (dragCard) {
+                e.preventDefault()
+                setOverCol(col.id)
+              }
+            }}
+            onDrop={(e) => {
+              if (dragCard) {
+                e.preventDefault()
+                onDropTo(col.id)
+              }
+            }}
+            style={{
+              flex: '0 0 236px',
+              display: 'flex',
+              flexDirection: 'column',
+              minHeight: 0,
+              borderRadius: 12,
+              padding: 8,
+              background: `color-mix(in srgb, ${col.color} ${isOver ? 16 : 8}%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${col.color} ${isOver ? 55 : 22}%, transparent)`,
+              transition: 'background .12s, border-color .12s'
+            }}
+          >
+            {/* Заголовок колонки */}
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 8 }}>
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: col.color, flexShrink: 0, boxShadow: `0 0 6px ${col.color}` }} />
+              <input
+                value={col.name}
+                onChange={(e) => renameColumn(col.id, e.currentTarget.value)}
+                onPointerDown={stopEventPropagation}
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  border: 'none',
+                  background: 'transparent',
+                  color: C.text,
+                  font: `700 12px ${NODE_SANS}`,
+                  outline: 'none',
+                  padding: '2px 0'
+                }}
+              />
+              <span
+                style={{
+                  fontSize: 11,
+                  fontWeight: 600,
+                  color: full ? '#F87171' : C.textDim,
+                  flexShrink: 0
+                }}
+              >
+                {col.cards.length}
+                {col.limit != null ? `/${col.limit}` : ''}
+              </span>
+              <button
+                onClick={() => delColumn(col.id)}
+                onPointerDown={stopEventPropagation}
+                title="Удалить колонку"
+                style={{ border: 'none', background: 'none', color: C.textDim, cursor: 'pointer', fontSize: 13, lineHeight: 1, padding: 0, flexShrink: 0 }}
+              >
+                ×
+              </button>
+            </div>
+
+            {/* Карточки */}
+            <div className="flow-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1, minHeight: 0 }}>
+              {col.cards.map((card) => {
+                const editing = editingId === card.id
+                return (
+                  <div
+                    key={card.id}
+                    draggable={!editing}
+                    onDragStart={(e) => {
+                      if (editing) return
+                      setDragCard({ colId: col.id, cardId: card.id })
+                      e.dataTransfer.effectAllowed = 'move'
+                      try {
+                        e.dataTransfer.setData('text/plain', card.text)
+                      } catch {
+                        /* ignore */
+                      }
+                    }}
+                    onDragEnd={() => {
+                      setDragCard(null)
+                      setOverCol(null)
+                    }}
+                    onDragOver={(e) => {
+                      if (dragCard && dragCard.cardId !== card.id) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        setOverCol(col.id)
+                      }
+                    }}
+                    onDrop={(e) => {
+                      if (dragCard && dragCard.cardId !== card.id) {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        onDropTo(col.id, card.id)
+                      }
+                    }}
+                    onDoubleClick={() => setEditingId(card.id)}
+                    className="flow-kanban-card"
+                    style={{
+                      position: 'relative',
+                      display: 'flex',
+                      alignItems: 'flex-start',
+                      gap: 7,
+                      padding: '8px 9px',
+                      borderRadius: 9,
+                      background: 'var(--panel)',
+                      border: `1px solid ${dragCard?.cardId === card.id ? `color-mix(in srgb, ${col.color} 60%, transparent)` : 'var(--border)'}`,
+                      boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+                      cursor: editing ? 'text' : 'grab',
+                      opacity: dragCard?.cardId === card.id ? 0.5 : 1
+                    }}
+                  >
+                    <button
+                      onClick={() => toggleDone(card.id)}
+                      onPointerDown={stopEventPropagation}
+                      title={card.done ? 'Снять отметку' : 'Отметить сделанным'}
+                      style={{
+                        flexShrink: 0,
+                        marginTop: 1,
+                        width: 15,
+                        height: 15,
+                        borderRadius: 4,
+                        border: `1.5px solid ${card.done ? col.color : 'var(--border)'}`,
+                        background: card.done ? col.color : 'transparent',
+                        color: '#0d1117',
+                        cursor: 'pointer',
+                        fontSize: 10,
+                        lineHeight: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'center'
+                      }}
+                    >
+                      {card.done ? '✓' : ''}
+                    </button>
+                    <div style={{ flex: 1, minWidth: 0 }}>
+                      {editing ? (
+                        <KanbanCardText
+                          value={card.text}
+                          autoFocus
+                          onChange={(v) => editCard(card.id, v)}
+                          onDone={() => {
+                            if (!card.text.trim()) delCard(card.id)
+                            setEditingId(null)
+                          }}
+                        />
+                      ) : (
+                        <span
+                          style={{
+                            font: `500 12px ${NODE_SANS}`,
+                            color: card.done ? C.textDim : C.text,
+                            textDecoration: card.done ? 'line-through' : 'none',
+                            whiteSpace: 'pre-wrap',
+                            wordBreak: 'break-word',
+                            lineHeight: 1.35
+                          }}
+                        >
+                          {card.text || '…'}
+                        </span>
+                      )}
+                    </div>
+                    {!editing && (
+                      <button
+                        className="flow-kanban-del"
+                        onClick={() => delCard(card.id)}
+                        onPointerDown={stopEventPropagation}
+                        title="Удалить"
+                        style={{
+                          flexShrink: 0,
+                          border: 'none',
+                          background: 'none',
+                          color: C.textDim,
+                          cursor: 'pointer',
+                          fontSize: 13,
+                          lineHeight: 1,
+                          padding: 0
+                        }}
+                      >
+                        ×
+                      </button>
+                    )}
+                  </div>
+                )
+              })}
+            </div>
+
+            {/* Добавить карточку */}
+            <button
+              onClick={() => addCard(col.id)}
+              onPointerDown={stopEventPropagation}
+              style={{
+                marginTop: 6,
+                border: `1px dashed color-mix(in srgb, ${col.color} 40%, var(--border))`,
+                background: 'transparent',
+                color: C.textDim,
+                borderRadius: 8,
+                padding: '6px',
+                fontSize: 11.5,
+                cursor: 'pointer',
+                fontFamily: NODE_SANS
+              }}
+            >
+              + Добавить карточку
+            </button>
+          </div>
+        )
+      })}
+
+      {/* Добавить колонку */}
+      <button
+        onClick={addColumn}
+        onPointerDown={stopEventPropagation}
+        style={{
+          flex: '0 0 46px',
+          alignSelf: 'stretch',
+          border: '1px dashed var(--border)',
+          background: 'transparent',
+          color: C.textDim,
+          borderRadius: 12,
+          cursor: 'pointer',
+          fontSize: 20,
+          fontFamily: NODE_SANS
+        }}
+        title="Добавить колонку"
+      >
+        +
+      </button>
+    </div>
+  )
+}
+
+// ---------- Большой мультиканбан-фрейм: несколько досок, ИИ-исполнитель ----------
+// Одна нода = целый бэклог: сколько угодно именованных досок (подтем), у каждой —
+// свои колонки и карточки-задачи. Карточки перетаскиваются между любыми колонками
+// любых досок. У каждой задачи есть кнопка «сделать через ИИ».
+type BoardCard = { id: string; text: string; done?: boolean; result?: string }
+type BoardColumn = { id: string; name: string; cards: BoardCard[] }
+type Board = { id: string; name: string; color: string; columns: BoardColumn[] }
+type BoardData = { boards: Board[] }
+
+const BOARD_HUES = ['#4ADE80', '#60A5FA', '#FB923C', '#A78BFA', '#F472B6', '#22D3EE', '#F59E0B', '#34D399', '#F87171', '#E879F9']
+
+function defaultBoard(): BoardData {
+  return {
+    boards: [
+      {
+        id: kbId(),
+        name: 'Новая доска',
+        color: BOARD_HUES[0],
+        columns: [
+          { id: kbId(), name: 'Идеи', cards: [] },
+          { id: kbId(), name: 'В работе', cards: [] },
+          { id: kbId(), name: 'Готово', cards: [] }
+        ]
+      }
+    ]
+  }
+}
+
+function readBoard(extra: string): BoardData {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = JSON.parse(extra || '{}').board as any
+    if (d && Array.isArray(d.boards) && d.boards.length) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      return {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        boards: d.boards.map((b: any, bi: number) => ({
+          id: String(b?.id ?? kbId()),
+          name: String(b?.name ?? ''),
+          color: String(b?.color ?? BOARD_HUES[bi % BOARD_HUES.length]),
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          columns: (Array.isArray(b?.columns) ? b.columns : []).map((c: any) => ({
+            id: String(c?.id ?? kbId()),
+            name: String(c?.name ?? ''),
+            // eslint-disable-next-line @typescript-eslint/no-explicit-any
+            cards: (Array.isArray(c?.cards) ? c.cards : []).map((k: any) => ({
+              id: String(k?.id ?? kbId()),
+              text: String(k?.text ?? ''),
+              done: !!k?.done,
+              result: k?.result ? String(k.result) : undefined
+            }))
+          }))
+        }))
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+  return defaultBoard()
+}
+
+// Весь фрейм → текст (передаётся в связанный ИИ-чат по гибкой стрелке).
+function boardToText(data: BoardData): string {
+  return data.boards
+    .map((b) => {
+      const cols = b.columns
+        .map((c) => {
+          const items = c.cards.length ? c.cards.map((k) => `    - [${k.done ? 'x' : ' '}] ${k.text}`).join('\n') : '    (пусто)'
+          return `  ${c.name}:\n${items}`
+        })
+        .join('\n')
+      return `Доска «${b.name}»:\n${cols}`
+    })
+    .join('\n\n')
+}
+
+function BoardBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
+  const update = useUpdate(editor, shape)
+  const data = readBoard(shape.props.extra)
+  const boards = data.boards
+  const model = shape.props.model
+  const [editingId, setEditingId] = useState<string | null>(null)
+  const [dragCard, setDragCard] = useState<{ colId: string; cardId: string } | null>(null)
+  const [overCol, setOverCol] = useState<string | null>(null)
+  const [running, setRunning] = useState<string[]>([])
+  const [expanded, setExpanded] = useState<string[]>([])
+  const [chatInput, setChatInput] = useState('')
+  const [chatSending, setChatSending] = useState(false)
+  const [chatOpen, setChatOpen] = useState(true)
+  const history: ChatMessage[] = (() => {
+    try {
+      return JSON.parse(shape.props.history || '[]')
+    } catch {
+      return []
+    }
+  })()
+
+  const sendChat = async () => {
+    const q = chatInput.trim()
+    if (!q || chatSending) return
+    setChatInput('')
+    setChatSending(true)
+    const sys =
+      'Ты — ассистент внутри канбан-бэклога. Помогаешь планировать, формулировать и выполнять задачи с досок. ' +
+      'Отвечай кратко и по делу, на русском, в Markdown.\n\nТекущее состояние досок:\n' +
+      boardToText(readBoard(shape.props.extra))
+    const ctx = gatherChatContext(editor, String(shape.id), ORCH_SKIP_KINDS)
+    const sysFull = ctx.length ? `${sys}\n\nСвязанные с бэклогом ноды:\n${ctx.join('\n\n').slice(0, 5000)}` : sys
+    const next: ChatMessage[] = [...history, { role: 'user', content: q }]
+    update({ history: JSON.stringify(next) })
+    try {
+      const res = await window.flow.aiChat({ model, messages: [{ role: 'system', content: sysFull }, ...next.slice(-10)] })
+      const answer = res.ok ? res.content : '⚠ ' + (res.error || 'ошибка ИИ')
+      update({ history: JSON.stringify([...next, { role: 'assistant', content: answer }]) })
+    } catch (e) {
+      update({ history: JSON.stringify([...next, { role: 'assistant', content: '⚠ ' + String(e) }]) })
+    } finally {
+      setChatSending(false)
+    }
+  }
+  const clearChat = () => update({ history: '[]' })
+
+  const save = (next: Board[]) => {
+    const ex = parseExtra(shape.props.extra)
+    update({ extra: JSON.stringify({ ...ex, board: { boards: next } }) })
+  }
+  const mutate = (fn: (bs: Board[]) => void) => {
+    const next = boards.map((b) => ({
+      ...b,
+      columns: b.columns.map((c) => ({ ...c, cards: c.cards.map((k) => ({ ...k })) }))
+    }))
+    fn(next)
+    save(next)
+  }
+  const eachCard = (bs: Board[], cardId: string, fn: (k: BoardCard, c: BoardColumn, b: Board) => void) => {
+    for (const b of bs) for (const c of b.columns) { const k = c.cards.find((x) => x.id === cardId); if (k) fn(k, c, b) }
+  }
+
+  const addCard = (colId: string) => {
+    const id = kbId()
+    mutate((bs) => {
+      for (const b of bs) { const c = b.columns.find((x) => x.id === colId); if (c) c.cards.push({ id, text: '' }) }
+    })
+    setEditingId(id)
+  }
+  const editCard = (cardId: string, text: string) => mutate((bs) => eachCard(bs, cardId, (k) => { k.text = text }))
+  const delCard = (cardId: string) => mutate((bs) => { for (const b of bs) for (const c of b.columns) c.cards = c.cards.filter((k) => k.id !== cardId) })
+  const toggleDone = (cardId: string) => mutate((bs) => eachCard(bs, cardId, (k) => { k.done = !k.done }))
+  const moveCard = (fromColId: string, cardId: string, toColId: string, beforeCardId?: string) =>
+    mutate((bs) => {
+      let from: BoardColumn | undefined
+      let to: BoardColumn | undefined
+      for (const b of bs) for (const c of b.columns) { if (c.id === fromColId) from = c; if (c.id === toColId) to = c }
+      if (!from || !to) return
+      const idx = from.cards.findIndex((k) => k.id === cardId)
+      if (idx < 0) return
+      const [card] = from.cards.splice(idx, 1)
+      let at = to.cards.length
+      if (beforeCardId) { const bi = to.cards.findIndex((k) => k.id === beforeCardId); if (bi >= 0) at = bi }
+      to.cards.splice(at, 0, card)
+    })
+  const onDropTo = (toColId: string, beforeCardId?: string) => {
+    if (dragCard) moveCard(dragCard.colId, dragCard.cardId, toColId, beforeCardId)
+    setDragCard(null)
+    setOverCol(null)
+  }
+
+  const addColumn = (boardId: string) => mutate((bs) => { const b = bs.find((x) => x.id === boardId); if (b) b.columns.push({ id: kbId(), name: 'Колонка', cards: [] }) })
+  const renameColumn = (colId: string, name: string) => mutate((bs) => { for (const b of bs) { const c = b.columns.find((x) => x.id === colId); if (c) c.name = name } })
+  const delColumn = (colId: string) => {
+    let cards = 0
+    for (const b of boards) { const c = b.columns.find((x) => x.id === colId); if (c) cards = c.cards.length }
+    if (cards && !window.confirm(`Удалить колонку вместе с ${cards} карточками?`)) return
+    mutate((bs) => { for (const b of bs) b.columns = b.columns.filter((c) => c.id !== colId) })
+  }
+  const addBoard = () => mutate((bs) => {
+    bs.push({ id: kbId(), name: 'Новая доска', color: BOARD_HUES[bs.length % BOARD_HUES.length], columns: [{ id: kbId(), name: 'Задачи', cards: [] }] })
+  })
+  const renameBoard = (boardId: string, name: string) => mutate((bs) => { const b = bs.find((x) => x.id === boardId); if (b) b.name = name })
+  const delBoard = (boardId: string) => {
+    const b = boards.find((x) => x.id === boardId)
+    const n = b ? b.columns.reduce((s, c) => s + c.cards.length, 0) : 0
+    if (n && !window.confirm(`Удалить доску «${b?.name}» со всеми её задачами (${n})?`)) return
+    mutate((bs) => { const i = bs.findIndex((x) => x.id === boardId); if (i >= 0) bs.splice(i, 1) })
+  }
+
+  const runAI = async (card: BoardCard, board: Board, col: BoardColumn) => {
+    if (running.includes(card.id) || !card.text.trim()) return
+    setRunning((r) => [...r, card.id])
+    setExpanded((e) => (e.includes(card.id) ? e : [...e, card.id]))
+    try {
+      const ctx = gatherChatContext(editor, String(shape.id), ORCH_SKIP_KINDS)
+      const sys =
+        'Ты — исполнитель задач с канбан-доски. Тебе дают ОДНУ задачу — выполни её: дай конкретный результат, ' +
+        'решение, план или готовый текст. Не рассуждай о том, как бы ты делал — сразу делай. Пиши по делу, на русском, в Markdown.'
+      const user =
+        `Доска: «${board.name}»\nКолонка: «${col.name}»\nЗадача: ${card.text}` +
+        (ctx.length ? `\n\nДополнительный контекст (связанные с доской ноды):\n${ctx.join('\n\n').slice(0, 6000)}` : '')
+      const res = await window.flow.aiChat({ model, messages: [{ role: 'system', content: sys }, { role: 'user', content: user }] })
+      mutate((bs) => eachCard(bs, card.id, (k) => {
+        if (res.ok) { k.result = res.content; k.done = true }
+        else k.result = '⚠ ' + (res.error || 'ошибка ИИ')
+      }))
+    } catch (e) {
+      mutate((bs) => eachCard(bs, card.id, (k) => { k.result = '⚠ ' + String(e) }))
+    } finally {
+      setRunning((r) => r.filter((x) => x !== card.id))
+    }
+  }
+
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      className="flow-scroll"
+      style={{ display: 'flex', flexDirection: 'column', gap: 14, height: '100%', overflowY: 'auto', overflowX: 'hidden', paddingRight: 4 }}
+    >
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+        <span style={{ fontSize: 11, color: C.textDim, whiteSpace: 'nowrap' }}>🤖 Модель-исполнитель:</span>
+        <div style={{ flex: 1 }}>
+          <ModelSelect value={model} onChange={(v) => update({ model: v })} />
+        </div>
+      </div>
+
+      {/* Небольшой чат с моделью: видит все доски и связанные ноды */}
+      <div style={{ flexShrink: 0, border: '1px solid var(--border)', borderRadius: 10, background: 'color-mix(in srgb, var(--panel2) 55%, transparent)', overflow: 'hidden' }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '7px 10px', cursor: 'pointer' }} onClick={() => setChatOpen((v) => !v)}>
+          <span style={{ font: `600 11px ${NODE_MONO}`, color: C.text, letterSpacing: '.02em' }}>💬 Чат с моделью</span>
+          {history.length > 0 && <span style={{ fontSize: 10, color: C.textDim }}>{Math.floor(history.length / 2)} реплик</span>}
+          <div style={{ flex: 1 }} />
+          {history.length > 0 && (
+            <button onClick={(e) => { stopEventPropagation(e); clearChat() }} onPointerDown={stopEventPropagation} title="Очистить чат" style={{ border: 'none', background: 'none', color: C.textDim, cursor: 'pointer', fontSize: 11 }}>очистить</button>
+          )}
+          <span style={{ color: C.textDim, fontSize: 11 }}>{chatOpen ? '▾' : '▸'}</span>
+        </div>
+        {chatOpen && (
+          <div style={{ borderTop: '1px solid var(--border)', padding: 8, display: 'flex', flexDirection: 'column', gap: 8 }}>
+            {history.filter((m) => m.role !== 'system').length > 0 && (
+              <div className="flow-scroll" style={{ maxHeight: 170, overflowY: 'auto', display: 'flex', flexDirection: 'column', gap: 8 }}>
+                {history.filter((m) => m.role !== 'system').map((m, i) => (
+                  <div key={i} style={{ display: 'flex', justifyContent: m.role === 'user' ? 'flex-end' : 'flex-start' }}>
+                    <div
+                      style={{
+                        maxWidth: '85%',
+                        padding: '6px 9px',
+                        borderRadius: 9,
+                        fontSize: 12,
+                        lineHeight: 1.4,
+                        background: m.role === 'user' ? 'color-mix(in srgb, var(--accent) 20%, var(--panel))' : 'var(--panel)',
+                        border: '1px solid var(--border)',
+                        color: C.text
+                      }}
+                    >
+                      {m.role === 'user' ? <span style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>{m.content}</span> : <MarkdownView content={m.content} />}
+                    </div>
+                  </div>
+                ))}
+                {chatSending && <div style={{ fontSize: 11, color: C.textDim, padding: '2px 4px' }}>Модель печатает…</div>}
+              </div>
+            )}
+            <div style={{ display: 'flex', gap: 6, alignItems: 'flex-end' }}>
+              <textarea
+                value={chatInput}
+                onChange={(e) => setChatInput(e.currentTarget.value)}
+                onPointerDown={stopEventPropagation}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter' && !e.shiftKey) {
+                    e.preventDefault()
+                    sendChat()
+                  }
+                }}
+                placeholder="Спроси модель о задачах, попроси распланировать…"
+                className="flow-input"
+                rows={1}
+                style={{ ...fieldStyle, flex: 1, resize: 'none', minHeight: 34, maxHeight: 90, lineHeight: 1.35, fontSize: 12 }}
+              />
+              <button
+                onClick={sendChat}
+                onPointerDown={stopEventPropagation}
+                disabled={chatSending || !chatInput.trim()}
+                style={{
+                  border: 'none',
+                  borderRadius: 9,
+                  padding: '8px 12px',
+                  fontSize: 12,
+                  fontWeight: 600,
+                  cursor: chatSending || !chatInput.trim() ? 'default' : 'pointer',
+                  color: '#fff',
+                  background: chatSending || !chatInput.trim() ? '#3a3a3c' : 'linear-gradient(180deg,#a5b4fc,#818CF8)',
+                  flexShrink: 0
+                }}
+              >
+                {chatSending ? '…' : '↑'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {boards.map((board) => (
+        <div
+          key={board.id}
+          style={{
+            borderRadius: 14,
+            padding: 12,
+            background: `color-mix(in srgb, ${board.color} 9%, transparent)`,
+            border: `1px solid color-mix(in srgb, ${board.color} 26%, transparent)`
+          }}
+        >
+          {/* Заголовок доски */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 10 }}>
+            <span
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                padding: '3px 10px',
+                borderRadius: 8,
+                background: 'var(--panel)',
+                border: `1px solid color-mix(in srgb, ${board.color} 45%, var(--border))`
+              }}
+            >
+              <span style={{ width: 8, height: 8, borderRadius: '50%', background: board.color, boxShadow: `0 0 6px ${board.color}` }} />
+              <input
+                value={board.name}
+                onChange={(e) => renameBoard(board.id, e.currentTarget.value)}
+                onPointerDown={stopEventPropagation}
+                style={{ border: 'none', background: 'transparent', color: C.text, font: `700 13px ${NODE_SANS}`, outline: 'none', width: Math.max(90, board.name.length * 8) }}
+              />
+            </span>
+            <span style={{ fontSize: 11, color: C.textDim }}>
+              {board.columns.reduce((s, c) => s + c.cards.length, 0)} задач
+            </span>
+            <div style={{ flex: 1 }} />
+            <button onClick={() => delBoard(board.id)} onPointerDown={stopEventPropagation} title="Удалить доску" style={{ border: 'none', background: 'none', color: C.textDim, cursor: 'pointer', fontSize: 14, lineHeight: 1 }}>×</button>
+          </div>
+
+          {/* Колонки доски */}
+          <div className="flow-scroll" style={{ display: 'flex', gap: 10, overflowX: 'auto', paddingBottom: 4, alignItems: 'flex-start' }}>
+            {board.columns.map((col) => {
+              const isOver = overCol === col.id
+              return (
+                <div
+                  key={col.id}
+                  onDragOver={(e) => { if (dragCard) { e.preventDefault(); setOverCol(col.id) } }}
+                  onDrop={(e) => { if (dragCard) { e.preventDefault(); onDropTo(col.id) } }}
+                  style={{
+                    flex: '0 0 172px',
+                    display: 'flex',
+                    flexDirection: 'column',
+                    borderRadius: 10,
+                    padding: 7,
+                    background: isOver ? `color-mix(in srgb, ${board.color} 14%, var(--panel))` : 'color-mix(in srgb, var(--panel) 70%, transparent)',
+                    border: `1px solid ${isOver ? `color-mix(in srgb, ${board.color} 55%, transparent)` : 'var(--border)'}`,
+                    transition: 'background .12s, border-color .12s'
+                  }}
+                >
+                  <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 6 }}>
+                    <input
+                      value={col.name}
+                      onChange={(e) => renameColumn(col.id, e.currentTarget.value)}
+                      onPointerDown={stopEventPropagation}
+                      style={{ flex: 1, minWidth: 0, border: 'none', background: 'transparent', color: C.textDim, font: `600 11px ${NODE_MONO}`, letterSpacing: '.02em', outline: 'none', textTransform: 'uppercase' }}
+                    />
+                    <span style={{ fontSize: 10, color: C.textDim, flexShrink: 0 }}>{col.cards.length}</span>
+                    <button onClick={() => delColumn(col.id)} onPointerDown={stopEventPropagation} title="Удалить колонку" style={{ border: 'none', background: 'none', color: C.textDim, cursor: 'pointer', fontSize: 12, lineHeight: 1, flexShrink: 0 }}>×</button>
+                  </div>
+
+                  <div className="flow-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+                    {col.cards.map((card) => {
+                      const editing = editingId === card.id
+                      const busy = running.includes(card.id)
+                      const open = expanded.includes(card.id)
+                      return (
+                        <div
+                          key={card.id}
+                          draggable={!editing}
+                          onDragStart={(e) => { if (editing) return; setDragCard({ colId: col.id, cardId: card.id }); e.dataTransfer.effectAllowed = 'move'; try { e.dataTransfer.setData('text/plain', card.text) } catch { /* ignore */ } }}
+                          onDragEnd={() => { setDragCard(null); setOverCol(null) }}
+                          onDragOver={(e) => { if (dragCard && dragCard.cardId !== card.id) { e.preventDefault(); e.stopPropagation(); setOverCol(col.id) } }}
+                          onDrop={(e) => { if (dragCard && dragCard.cardId !== card.id) { e.preventDefault(); e.stopPropagation(); onDropTo(col.id, card.id) } }}
+                          onDoubleClick={() => setEditingId(card.id)}
+                          className="flow-kanban-card"
+                          style={{
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 6,
+                            padding: '7px 8px',
+                            borderRadius: 8,
+                            background: 'var(--panel2)',
+                            border: `1px solid ${dragCard?.cardId === card.id ? `color-mix(in srgb, ${board.color} 60%, transparent)` : 'var(--border)'}`,
+                            cursor: editing ? 'text' : 'grab',
+                            opacity: dragCard?.cardId === card.id ? 0.5 : 1
+                          }}
+                        >
+                          <div style={{ display: 'flex', alignItems: 'flex-start', gap: 6 }}>
+                            <button
+                              onClick={() => toggleDone(card.id)}
+                              onPointerDown={stopEventPropagation}
+                              title={card.done ? 'Снять отметку' : 'Готово'}
+                              style={{ flexShrink: 0, marginTop: 1, width: 14, height: 14, borderRadius: 4, border: `1.5px solid ${card.done ? board.color : 'var(--border)'}`, background: card.done ? board.color : 'transparent', color: '#0d1117', cursor: 'pointer', fontSize: 9, lineHeight: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}
+                            >
+                              {card.done ? '✓' : ''}
+                            </button>
+                            <div style={{ flex: 1, minWidth: 0 }}>
+                              {editing ? (
+                                <KanbanCardText value={card.text} autoFocus onChange={(v) => editCard(card.id, v)} onDone={() => { if (!card.text.trim()) delCard(card.id); setEditingId(null) }} />
+                              ) : (
+                                <span style={{ font: `500 11.5px ${NODE_SANS}`, color: card.done ? C.textDim : C.text, textDecoration: card.done ? 'line-through' : 'none', whiteSpace: 'pre-wrap', wordBreak: 'break-word', lineHeight: 1.35 }}>
+                                  {card.text || '…'}
+                                </span>
+                              )}
+                            </div>
+                          </div>
+                          {!editing && (
+                            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                              <button
+                                onClick={() => runAI(card, board, col)}
+                                onPointerDown={stopEventPropagation}
+                                disabled={busy}
+                                title="Выполнить задачу с помощью ИИ"
+                                style={{ border: `1px solid color-mix(in srgb, ${board.color} 40%, var(--border))`, background: 'transparent', color: busy ? C.textDim : board.color, borderRadius: 6, fontSize: 10, padding: '2px 7px', cursor: busy ? 'default' : 'pointer', fontFamily: NODE_SANS, whiteSpace: 'nowrap' }}
+                              >
+                                {busy ? '⏳ ИИ…' : '🤖 Сделать'}
+                              </button>
+                              {card.result && (
+                                <button onClick={() => setExpanded((ex) => (open ? ex.filter((x) => x !== card.id) : [...ex, card.id]))} onPointerDown={stopEventPropagation} style={{ border: 'none', background: 'none', color: C.textDim, cursor: 'pointer', fontSize: 10 }}>
+                                  {open ? '▾ скрыть' : '▸ результат'}
+                                </button>
+                              )}
+                              <div style={{ flex: 1 }} />
+                              <button onClick={() => delCard(card.id)} onPointerDown={stopEventPropagation} title="Удалить" style={{ border: 'none', background: 'none', color: C.textDim, cursor: 'pointer', fontSize: 12, lineHeight: 1 }}>×</button>
+                            </div>
+                          )}
+                          {card.result && open && !editing && (
+                            <div onPointerDown={stopEventPropagation} onWheelCapture={stopEventPropagation} style={{ maxHeight: 180, overflow: 'auto', borderTop: `1px solid var(--border)`, paddingTop: 6, fontSize: 11 }} className="flow-scroll">
+                              <MarkdownView content={card.result} />
+                            </div>
+                          )}
+                        </div>
+                      )
+                    })}
+                  </div>
+
+                  <button
+                    onClick={() => addCard(col.id)}
+                    onPointerDown={stopEventPropagation}
+                    style={{ marginTop: 6, border: `1px dashed color-mix(in srgb, ${board.color} 35%, var(--border))`, background: 'transparent', color: C.textDim, borderRadius: 7, padding: '5px', fontSize: 11, cursor: 'pointer', fontFamily: NODE_SANS }}
+                  >
+                    + Задача
+                  </button>
+                </div>
+              )
+            })}
+
+            {/* Добавить колонку в доску */}
+            <button onClick={() => addColumn(board.id)} onPointerDown={stopEventPropagation} title="Добавить колонку" style={{ flex: '0 0 40px', alignSelf: 'stretch', minHeight: 60, border: '1px dashed var(--border)', background: 'transparent', color: C.textDim, borderRadius: 10, cursor: 'pointer', fontSize: 18, fontFamily: NODE_SANS }}>+</button>
+          </div>
+        </div>
+      ))}
+
+      {/* Добавить доску */}
+      <button
+        onClick={addBoard}
+        onPointerDown={stopEventPropagation}
+        style={{ flexShrink: 0, border: '1px dashed var(--border)', background: 'transparent', color: C.textDim, borderRadius: 12, padding: '10px', fontSize: 12.5, cursor: 'pointer', fontFamily: NODE_SANS }}
+      >
+        + Добавить доску
+      </button>
+    </div>
+  )
+}
+
+function ListBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
+  const update = useUpdate(editor, shape)
+  const { model } = shape.props
+  const ex = parseExtra(shape.props.extra)
+  const content = ex.content ?? ''
+  const cats = ex.cats ?? ''
+  const setEx = (patch: Record<string, string>) => update({ extra: JSON.stringify({ ...ex, ...patch }) })
+  const [gen, setGen] = useState(false)
+  const [status, setStatus] = useState<string | null>(null)
+
+  const apply = async () => {
+    if (!content.trim() || gen) return
+    setGen(true)
+    setStatus('🗂 Раскладываю по категориям…')
+    try {
+      const sys =
+        'Ты раскладываешь элементы в аккуратный структурированный список по категориям. ' +
+        'Верни ТОЛЬКО валидный JSON без markdown-ограждений в формате ' +
+        '{"title": "краткое название списка", "groups": [{"name": "Категория", "items": ["пункт", "пункт"]}]}. ' +
+        'Пункты — короткие строки. Если пользователь задал желаемые категории — используй их; иначе придумай логичные. На русском.'
+      const res = await window.flow.aiChat({
+        model,
+        messages: [
+          { role: 'system', content: sys },
+          { role: 'user', content: `Что нужно в списке: ${content}\nЖелаемые категории: ${cats || '(придумай сам)'}` }
+        ]
+      })
+      if (res.ok) {
+        const data = parseListJson(res.content)
+        if (data) {
+          spawnListCard(editor, String(shape.id), data)
+          setStatus('Готово ✓')
+        } else setStatus('Не удалось разобрать ответ модели')
+      } else setStatus(res.error)
+    } catch (e) {
+      setStatus(String(e))
+    } finally {
+      setGen(false)
+    }
+  }
+
+  return (
+    <div onPointerDown={stopEventPropagation} onWheelCapture={stopEventPropagation} style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
+      <ModelSelect value={model} onChange={(v) => update({ model: v })} />
+      <label style={{ fontSize: 11, color: C.textDim }}>Содержание списка</label>
+      <textarea
+        className="flow-input"
+        value={content}
+        onChange={(e) => setEx({ content: e.currentTarget.value })}
+        placeholder="Что должно быть в списке…"
+        style={{ ...fieldStyle, minHeight: 60, maxHeight: 110, resize: 'none', lineHeight: 1.4 }}
+      />
+      <label style={{ fontSize: 11, color: C.textDim }}>Категории (опционально)</label>
+      <textarea
+        className="flow-input"
+        value={cats}
+        onChange={(e) => setEx({ cats: e.currentTarget.value })}
+        placeholder="Какие категории должны быть — или оставь пустым"
+        style={{ ...fieldStyle, minHeight: 40, maxHeight: 70, resize: 'none', lineHeight: 1.4 }}
+      />
+      <button
+        onClick={apply}
+        disabled={gen}
+        style={{
+          cursor: gen ? 'default' : 'pointer',
+          border: 'none',
+          borderRadius: 10,
+          padding: '8px',
+          fontSize: 12.5,
+          fontWeight: 600,
+          color: '#3a2500',
+          background: gen ? '#3a3a3c' : 'linear-gradient(180deg,#fbbf5a,#F59E0B)',
+          boxShadow: gen ? 'none' : '0 2px 8px rgba(245,158,11,0.3)'
+        }}
+      >
+        {gen ? '🗂 Раскладываю…' : '🗂 Применить'}
+      </button>
+      {status && <div style={{ fontSize: 11, color: C.textDim }}>{status}</div>}
+    </div>
+  )
+}
+
+// Плашки-колонки результата. Редактируемые: правка/добавление/удаление пунктов и колонок.
+function ListCardBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
+  const update = useUpdate(editor, shape)
+  const data = readList(shape.props.extra)
+  const save = (next: ListData) => {
+    const ex = (() => {
+      try {
+        return JSON.parse(shape.props.extra || '{}')
+      } catch {
+        return {}
+      }
+    })()
+    update({ extra: JSON.stringify({ ...ex, list: next }), title: next.title || shape.props.title })
+  }
+  const editGroups = (fn: (g: ListGroup[]) => ListGroup[]) => save({ ...data, groups: fn(data.groups.map((g) => ({ ...g, items: [...g.items] }))) })
+
+  if (!data.groups.length) {
+    return <div style={{ fontSize: 12, color: C.textDim, padding: 8 }}>Пустой список.</div>
+  }
+
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      className="flow-scroll"
+      style={{ display: 'flex', gap: 12, height: '100%', overflowX: 'auto', overflowY: 'hidden', paddingBottom: 6 }}
+    >
+      {data.groups.map((g, gi) => {
+        const hue = GROUP_HUES[gi % GROUP_HUES.length]
+        return (
+          <div
+            key={gi}
+            style={{
+              flex: '0 0 190px',
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 7,
+              minHeight: 0,
+              borderRadius: 12,
+              padding: 8,
+              background: `color-mix(in srgb, ${hue} 8%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${hue} 22%, transparent)`
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+              <input
+                value={g.name}
+                onChange={(e) => editGroups((gs) => (gs[gi].name = e.currentTarget.value, gs))}
+                placeholder="Категория"
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  background: 'transparent',
+                  border: 'none',
+                  outline: 'none',
+                  color: hue,
+                  font: `600 12px ${NODE_SANS}`
+                }}
+              />
+              <button
+                title="Удалить колонку"
+                onClick={() => editGroups((gs) => gs.filter((_, i) => i !== gi))}
+                style={{ border: 'none', background: 'transparent', color: C.textDim, cursor: 'pointer', fontSize: 13, lineHeight: 1 }}
+              >
+                ×
+              </button>
+            </div>
+            <div className="flow-scroll" style={{ display: 'flex', flexDirection: 'column', gap: 6, overflowY: 'auto', flex: 1 }}>
+              {g.items.map((it, ii) => (
+                <div
+                  key={ii}
+                  className="flow-chip-card"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'flex-start',
+                    gap: 4,
+                    borderRadius: 9,
+                    padding: '6px 8px',
+                    background: `color-mix(in srgb, ${hue} 13%, transparent)`,
+                    border: `1px solid color-mix(in srgb, ${hue} 20%, transparent)`
+                  }}
+                >
+                  <textarea
+                    value={it}
+                    rows={1}
+                    onChange={(e) => editGroups((gs) => (gs[gi].items[ii] = e.currentTarget.value, gs))}
+                    style={{
+                      flex: 1,
+                      minWidth: 0,
+                      background: 'transparent',
+                      border: 'none',
+                      outline: 'none',
+                      resize: 'none',
+                      color: C.text,
+                      font: `400 12px ${NODE_SANS}`,
+                      lineHeight: 1.35
+                    }}
+                  />
+                  <button
+                    onClick={() => editGroups((gs) => (gs[gi].items = gs[gi].items.filter((_, i) => i !== ii), gs))}
+                    style={{ border: 'none', background: 'transparent', color: C.textDim, cursor: 'pointer', fontSize: 12, lineHeight: 1, opacity: 0.6 }}
+                  >
+                    ×
+                  </button>
+                </div>
+              ))}
+              <button
+                onClick={() => editGroups((gs) => (gs[gi].items.push(''), gs))}
+                style={{ border: `1px dashed color-mix(in srgb, ${hue} 30%, transparent)`, background: 'transparent', color: hue, borderRadius: 8, padding: '4px', fontSize: 11, cursor: 'pointer' }}
+              >
+                + пункт
+              </button>
+            </div>
+          </div>
+        )
+      })}
+      <button
+        onClick={() => editGroups((gs) => [...gs, { name: 'Новая категория', items: [] }])}
+        style={{ flex: '0 0 auto', alignSelf: 'flex-start', border: `1px dashed ${C.border}`, background: 'transparent', color: C.textDim, borderRadius: 10, padding: '8px 12px', fontSize: 12, cursor: 'pointer', whiteSpace: 'nowrap' }}
+      >
+        + колонка
+      </button>
+    </div>
+  )
+}
+
+// ================= Нода «Таблица» (Excel): сетка + формулы + экспорт .xlsx ==========
+type SheetModel = {
+  rows: number
+  cols: number
+  cells: Record<string, string>
+  colW?: Record<string, number> // ширина столбцов (px) по индексу
+  rowH?: Record<string, number> // высота строк (px) по индексу
+}
+function colName(c: number): string {
+  let s = ''
+  let n = c + 1
+  while (n > 0) {
+    const m = (n - 1) % 26
+    s = String.fromCharCode(65 + m) + s
+    n = Math.floor((n - 1) / 26)
+  }
+  return s
+}
+function parseRef(ref: string): { r: number; c: number } | null {
+  const m = /^([A-Za-z]+)(\d+)$/.exec(ref.trim())
+  if (!m) return null
+  let c = 0
+  for (const ch of m[1].toUpperCase()) c = c * 26 + (ch.charCodeAt(0) - 64)
+  return { c: c - 1, r: parseInt(m[2], 10) - 1 }
+}
+function readSheet(extra: string): SheetModel {
+  try {
+    const d = JSON.parse(extra || '{}').sheet
+    if (d && typeof d.rows === 'number') return { rows: d.rows, cols: d.cols, cells: d.cells || {}, colW: d.colW || {}, rowH: d.rowH || {} }
+  } catch {
+    /* ignore */
+  }
+  return { rows: 6, cols: 5, cells: {} }
+}
+// Вычислитель ячеек: формулы =…, ссылки A1, диапазоны A1:B3, функции SUM/AVG/MIN/MAX/COUNT.
+function makeCompute(model: SheetModel): (r: number, c: number) => number | string {
+  const memo = new Map<string, number | string>()
+  const inProg = new Set<string>()
+  const rawAt = (r: number, c: number): string => model.cells[`${r}:${c}`] ?? ''
+  const num = (v: number | string): number => (typeof v === 'number' ? v : Number(String(v).replace(',', '.')) || 0)
+
+  const compute = (r: number, c: number): number | string => {
+    const key = `${r}:${c}`
+    if (memo.has(key)) return memo.get(key) as number | string
+    if (inProg.has(key)) return '#ЦИКЛ'
+    inProg.add(key)
+    let out: number | string
+    const v = rawAt(r, c).trim()
+    if (v.startsWith('=')) {
+      try {
+        out = evalFormula(v.slice(1))
+      } catch {
+        out = '#ОШ'
+      }
+    } else if (v !== '' && !isNaN(Number(v.replace(',', '.')))) out = Number(v.replace(',', '.'))
+    else out = v
+    inProg.delete(key)
+    memo.set(key, out)
+    return out
+  }
+
+  // Рекурсивный разбор арифметики (числа, ссылки, диапазоны, функции, + - * / скобки)
+  function evalFormula(src: string): number {
+    let i = 0
+    const s = src
+    const ws = (): void => {
+      while (i < s.length && s[i] === ' ') i++
+    }
+    const rangeValues = (): number[] => {
+      // читаем ссылку, возможно диапазон A1:B3
+      const start = i
+      while (i < s.length && /[A-Za-z0-9]/.test(s[i])) i++
+      let a = s.slice(start, i)
+      if (s[i] === ':') {
+        i++
+        const st2 = i
+        while (i < s.length && /[A-Za-z0-9]/.test(s[i])) i++
+        const b = s.slice(st2, i)
+        const ra = parseRef(a)
+        const rb = parseRef(b)
+        if (!ra || !rb) return []
+        const out: number[] = []
+        for (let rr = Math.min(ra.r, rb.r); rr <= Math.max(ra.r, rb.r); rr++)
+          for (let cc = Math.min(ra.c, rb.c); cc <= Math.max(ra.c, rb.c); cc++) out.push(num(compute(rr, cc)))
+        return out
+      }
+      const ref = parseRef(a)
+      return ref ? [num(compute(ref.r, ref.c))] : []
+    }
+    function factor(): number {
+      ws()
+      if (s[i] === '(') {
+        i++
+        const v = expr()
+        ws()
+        if (s[i] === ')') i++
+        return v
+      }
+      if (s[i] === '-') {
+        i++
+        return -factor()
+      }
+      if (s[i] === '+') {
+        i++
+        return factor()
+      }
+      // число
+      const start = i
+      while (i < s.length && /[0-9.,]/.test(s[i])) i++
+      if (i > start) return Number(s.slice(start, i).replace(',', '.')) || 0
+      // идентификатор: функция или ссылка
+      const idStart = i
+      while (i < s.length && /[A-Za-z]/.test(s[i])) i++
+      const name = s.slice(idStart, i).toUpperCase()
+      if (s[i] === '(') {
+        i++
+        const args: number[] = []
+        // аргументы могут быть диапазонами/выражениями через запятую
+        ws()
+        while (s[i] !== ')' && i < s.length) {
+          // если похоже на диапазон/ссылку — берём как значения
+          const save = i
+          const looksRef = /^[A-Za-z]+\d/.test(s.slice(i))
+          if (looksRef) {
+            args.push(...rangeValues())
+          } else {
+            i = save
+            args.push(expr())
+          }
+          ws()
+          if (s[i] === ',') {
+            i++
+            ws()
+          }
+        }
+        if (s[i] === ')') i++
+        const sum = args.reduce((a, b) => a + b, 0)
+        switch (name) {
+          case 'SUM':
+            return sum
+          case 'AVG':
+          case 'AVERAGE':
+          case 'СРЗНАЧ':
+            return args.length ? sum / args.length : 0
+          case 'MIN':
+            return args.length ? Math.min(...args) : 0
+          case 'MAX':
+            return args.length ? Math.max(...args) : 0
+          case 'COUNT':
+          case 'СЧЁТ':
+            return args.length
+          default:
+            return sum
+        }
+      }
+      // ссылка на ячейку
+      i = idStart
+      const vals = rangeValues()
+      return vals[0] ?? 0
+    }
+    function term(): number {
+      let v = factor()
+      ws()
+      while (s[i] === '*' || s[i] === '/') {
+        const op = s[i++]
+        const rhs = factor()
+        v = op === '*' ? v * rhs : rhs === 0 ? 0 : v / rhs
+        ws()
+      }
+      return v
+    }
+    function expr(): number {
+      let v = term()
+      ws()
+      while (s[i] === '+' || s[i] === '-') {
+        const op = s[i++]
+        const rhs = term()
+        v = op === '+' ? v + rhs : v - rhs
+        ws()
+      }
+      return v
+    }
+    const r = expr()
+    return Math.round(r * 1e9) / 1e9
+  }
+
+  return compute
+}
+
+// Построить модель таблицы из массива строк (импорт Excel/CSV, генерация ИИ)
+function sheetFromAoa(aoa: (string | number)[][]): SheetModel {
+  const cells: Record<string, string> = {}
+  let cols = 0
+  aoa.forEach((row, r) => {
+    if (!Array.isArray(row)) return
+    row.forEach((v, c) => {
+      if (v !== '' && v != null) cells[`${r}:${c}`] = String(v)
+      if (c + 1 > cols) cols = c + 1
+    })
+  })
+  return { rows: Math.max(aoa.length, 6), cols: Math.max(cols, 5), cells }
+}
+// Разобрать .xlsx/.xls/.csv в модель таблицы (первый лист) — используется и при дропе на холст.
+// CSV читаем как UTF-8 текст (иначе SheetJS ломает кириллицу в кракозябры); xlsx — как байты.
+export async function sheetModelFromFile(file: File): Promise<SheetModel> {
+  let wb: XLSX.WorkBook
+  if (/\.csv$/i.test(file.name)) {
+    wb = XLSX.read(await file.text(), { type: 'string' })
+  } else {
+    wb = XLSX.read(await file.arrayBuffer(), { type: 'array' })
+  }
+  const ws = wb.Sheets[wb.SheetNames[0]]
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const aoa = XLSX.utils.sheet_to_json(ws, { header: 1, raw: true, defval: '' }) as any[]
+  return sheetFromAoa(aoa)
+}
+function parseTableJson(text: string): SheetModel | null {
+  try {
+    const m = text.match(/\{[\s\S]*\}/)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const raw: any = JSON.parse(m ? m[0] : text)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const headers: (string | number)[] = Array.isArray(raw.headers) ? raw.headers.map((x: any) => String(x)) : []
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rows: any[] = Array.isArray(raw.rows) ? raw.rows : []
+    const aoa: (string | number)[][] = [
+      ...(headers.length ? [headers] : []),
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      ...rows.map((r: any) => (Array.isArray(r) ? r.map((x: any) => (x == null ? '' : x)) : [String(r)]))
+    ]
+    if (!aoa.length) return null
+    return sheetFromAoa(aoa)
+  } catch {
+    return null
+  }
+}
+const sheetChoiceBtn = (color: string): React.CSSProperties => ({
+  border: `1px solid color-mix(in srgb, ${color} 45%, var(--border))`,
+  background: `color-mix(in srgb, ${color} 12%, transparent)`,
+  color,
+  borderRadius: 10,
+  padding: '10px 16px',
+  fontSize: 13,
+  fontWeight: 600,
+  cursor: 'pointer',
+  minWidth: 230
+})
+
+function SheetBody({ shape, editor, full }: { shape: FlowNodeShape; editor: Editor; full?: boolean }) {
+  const update = useUpdate(editor, shape)
+  // ХУКИ — до любых ранних return (правила hooks)
+  const [focus, setFocus] = useState<string | null>(null)
+  const [view, setView] = useState({ rows: 0, cols: 0 })
+  const [gen, setGen] = useState(false)
+  const [err, setErr] = useState<string | null>(null)
+  const fileRef = useRef<HTMLInputElement>(null)
+  const scrollRef = useRef<HTMLDivElement>(null)
+  const [fit, setFit] = useState({ rows: 0, cols: 0 }) // сколько строк/столбцов влезает (заполняем экран)
+  // Живой ресайз столбца/строки и перетаскивание строки — локально, коммит на pointerup
+  const [drag, setDrag] = useState<{ type: 'col' | 'row'; i: number; size: number } | null>(null)
+  const [dropRow, setDropRow] = useState<number | null>(null)
+
+  const ex = (() => {
+    try {
+      return JSON.parse(shape.props.extra || '{}')
+    } catch {
+      return {}
+    }
+  })() as { sheet?: SheetModel; smode?: string; prompt?: string }
+  const hasSheet = !!(ex.sheet && typeof ex.sheet.rows === 'number')
+  const setEx = (patch: Record<string, unknown>) => update({ extra: JSON.stringify({ ...ex, ...patch }) })
+
+  // Измеряем видимую область → рисуем на несколько строк/столбцов больше, чем влезает,
+  // чтобы всегда была прокрутка (иначе «бесконечность» не запускается на большом экране).
+  useEffect(() => {
+    const el = scrollRef.current
+    if (!el || !hasSheet) return
+    const rowPx = full ? 35 : 27
+    const colPx = full ? 120 : 96
+    const measure = (): void => setFit({ rows: Math.ceil(el.clientHeight / rowPx) + 4, cols: Math.ceil(el.clientWidth / colPx) + 2 })
+    measure()
+    const ro = new ResizeObserver(measure)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [full, hasSheet])
+
+  const importFile = async (file?: File | null) => {
+    if (!file) return
+    try {
+      setEx({ sheet: await sheetModelFromFile(file), smode: undefined })
+    } catch (e) {
+      setErr('Не удалось прочитать файл: ' + String(e))
+    }
+  }
+  const generate = async () => {
+    if (!(ex.prompt || '').trim() || gen) return
+    setGen(true)
+    setErr(null)
+    try {
+      const sys =
+        'Ты генерируешь табличные данные. По описанию верни ТОЛЬКО JSON вида ' +
+        '{"headers":["Колонка1","Колонка2"],"rows":[["значение","значение"], ...]} без markdown-ограждений. ' +
+        'Числа — числами. Заголовки и данные — на русском.'
+      const res = await window.flow.aiChat({
+        model: shape.props.model,
+        messages: [{ role: 'system', content: sys }, { role: 'user', content: ex.prompt || '' }]
+      })
+      if (res.ok) {
+        const m = parseTableJson(res.content)
+        if (m) setEx({ sheet: m, smode: undefined })
+        else setErr('Не удалось разобрать ответ модели')
+      } else setErr(res.error)
+    } catch (e) {
+      setErr(String(e))
+    } finally {
+      setGen(false)
+    }
+  }
+  const hiddenFile = (
+    <input
+      ref={fileRef}
+      type="file"
+      accept=".xlsx,.xls,.csv"
+      style={{ display: 'none' }}
+      onChange={(e) => {
+        importFile(e.currentTarget.files?.[0])
+        e.currentTarget.value = ''
+      }}
+    />
+  )
+
+  // ---- Экран выбора: как создать таблицу ----
+  if (!hasSheet && ex.smode !== 'ai') {
+    return (
+      <div onPointerDown={stopEventPropagation} style={{ display: 'flex', flexDirection: 'column', gap: 10, height: '100%', alignItems: 'center', justifyContent: 'center', padding: 14, textAlign: 'center' }}>
+        {hiddenFile}
+        <div style={{ fontSize: 13, color: C.textDim, lineHeight: 1.5, marginBottom: 2 }}>Как создать таблицу?</div>
+        <button onClick={() => setEx({ sheet: { rows: 8, cols: 6, cells: {} } })} style={sheetChoiceBtn('#34D399')}>▦ Пустая таблица</button>
+        <button onClick={() => setEx({ smode: 'ai' })} style={sheetChoiceBtn('#22D3EE')}>🤖 Описать в чате</button>
+        <button onClick={() => fileRef.current?.click()} style={sheetChoiceBtn('var(--muted)')}>📥 Импорт Excel / CSV</button>
+        {err && <div style={{ fontSize: 11, color: '#F87171' }}>{err}</div>}
+      </div>
+    )
+  }
+
+  // ---- Экран описания для ИИ ----
+  if (!hasSheet && ex.smode === 'ai') {
+    return (
+      <div onPointerDown={stopEventPropagation} onWheelCapture={stopEventPropagation} style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
+        <ModelSelect value={shape.props.model} onChange={(v) => update({ model: v })} />
+        <textarea
+          className="flow-input"
+          value={ex.prompt || ''}
+          onChange={(e) => setEx({ prompt: e.currentTarget.value })}
+          placeholder="Опиши таблицу (напр. «бюджет на месяц: категория, план, факт»)…"
+          style={{ ...fieldStyle, minHeight: 64, maxHeight: 130, resize: 'none', lineHeight: 1.4 }}
+        />
+        <div style={{ display: 'flex', gap: 6 }}>
+          <button onClick={() => setEx({ smode: undefined })} title="Назад" style={{ border: `1px solid ${C.border}`, background: 'transparent', color: C.text, borderRadius: 8, padding: '8px 12px', cursor: 'pointer' }}>←</button>
+          <button
+            onClick={generate}
+            disabled={gen}
+            style={{ flex: 1, cursor: gen ? 'default' : 'pointer', border: 'none', borderRadius: 10, padding: '8px', fontSize: 12.5, fontWeight: 600, color: '#00312a', background: gen ? '#3a3a3c' : 'linear-gradient(180deg,#6ee7b7,#34D399)' }}
+          >
+            {gen ? '🤖 Собираю…' : '🤖 Сгенерировать'}
+          </button>
+        </div>
+        {err && <div style={{ fontSize: 11, color: '#F87171' }}>{err}</div>}
+      </div>
+    )
+  }
+
+  // ---- Сетка: бесконечная + ресайз столбцов/строк + перестановка строк ----
+  const model = ex.sheet as SheetModel
+  const compute = makeCompute(model)
+  const save = (next: SheetModel) => setEx({ sheet: next })
+  const setCell = (r: number, c: number, v: string) => {
+    const cells = { ...model.cells }
+    if (v === '') delete cells[`${r}:${c}`]
+    else cells[`${r}:${c}`] = v
+    save({ ...model, rows: Math.max(model.rows, r + 1), cols: Math.max(model.cols, c + 1), cells })
+  }
+  const exportXlsx = async () => {
+    const aoa: (string | number)[][] = []
+    for (let r = 0; r < model.rows; r++) {
+      const row: (string | number)[] = []
+      for (let c = 0; c < model.cols; c++) row.push(compute(r, c))
+      aoa.push(row)
+    }
+    const ws = XLSX.utils.aoa_to_sheet(aoa)
+    const wb = XLSX.utils.book_new()
+    XLSX.utils.book_append_sheet(wb, ws, 'Лист1')
+    const base64 = XLSX.write(wb, { type: 'base64', bookType: 'xlsx' })
+    await window.flow.saveFile({ base64, name: (shape.props.title || 'Таблица') + '.xlsx' })
+  }
+
+  const DEF_CW = full ? 120 : 96
+  const DEF_RH = full ? 34 : 26
+  const colWidth = (c: number): number => (drag && drag.type === 'col' && drag.i === c ? drag.size : model.colW?.[c] ?? DEF_CW)
+  const rowHeight = (r: number): number => (drag && drag.type === 'row' && drag.i === r ? drag.size : model.rowH?.[r] ?? DEF_RH)
+
+  // Перетащить строку from на место to (сдвигаем остальные)
+  const moveRow = (from: number, to: number): void => {
+    if (from === to) return
+    const remap = (r: number): number => {
+      if (r === from) return to
+      if (from < to && r > from && r <= to) return r - 1
+      if (from > to && r >= to && r < from) return r + 1
+      return r
+    }
+    const cells: Record<string, string> = {}
+    for (const [k, v] of Object.entries(model.cells)) {
+      const [r, c] = k.split(':').map(Number)
+      cells[`${remap(r)}:${c}`] = v
+    }
+    const rowH: Record<string, number> = {}
+    for (const [k, v] of Object.entries(model.rowH || {})) rowH[remap(Number(k))] = v
+    save({ ...model, cells, rowH })
+  }
+
+  // Ресайз столбца/строки перетаскиванием границы (живой предпросмотр в drag, коммит на pointerup)
+  const startResize = (type: 'col' | 'row', i: number, e: React.PointerEvent): void => {
+    e.preventDefault()
+    e.stopPropagation()
+    const startPos = type === 'col' ? e.clientX : e.clientY
+    const startSize = type === 'col' ? colWidth(i) : rowHeight(i)
+    const minS = type === 'col' ? 44 : 20
+    const sizeAt = (ev: PointerEvent): number => Math.max(minS, Math.round(startSize + ((type === 'col' ? ev.clientX : ev.clientY) - startPos)))
+    const onMove = (ev: PointerEvent): void => setDrag({ type, i, size: sizeAt(ev) })
+    const onUp = (ev: PointerEvent): void => {
+      window.removeEventListener('pointermove', onMove)
+      window.removeEventListener('pointerup', onUp)
+      const size = sizeAt(ev)
+      if (type === 'col') save({ ...model, colW: { ...(model.colW || {}), [i]: size } })
+      else save({ ...model, rowH: { ...(model.rowH || {}), [i]: size } })
+      setDrag(null)
+    }
+    window.addEventListener('pointermove', onMove)
+    window.addEventListener('pointerup', onUp)
+  }
+
+  // Сколько рисуем: не меньше данных+запас, измеренного заполнения экрана и «докрученного» скроллом
+  const baseRows = fit.rows || (full ? 26 : 12)
+  const baseCols = fit.cols || (full ? 12 : 6)
+  const rows = Math.max(model.rows + 2, baseRows, view.rows)
+  const cols = Math.max(model.cols + 1, baseCols, view.cols)
+  const onScroll = (e: React.UIEvent<HTMLDivElement>): void => {
+    const el = e.currentTarget
+    if (el.scrollTop + el.clientHeight > el.scrollHeight - 160) setView((v) => ({ rows: Math.max(v.rows, rows) + 20, cols: v.cols }))
+    if (el.scrollLeft + el.clientWidth > el.scrollWidth - 200) setView((v) => ({ rows: v.rows, cols: Math.max(v.cols, cols) + 8 }))
+  }
+
+  const btn = { border: `1px solid ${C.border}`, background: 'color-mix(in srgb, var(--text) 5%, transparent)', color: C.text, borderRadius: 7, fontSize: full ? 13 : 11, padding: full ? '7px 13px' : '4px 8px', cursor: 'pointer' } as const
+  const cellFs = full ? 15 : 12
+
+  return (
+    <div onPointerDown={stopEventPropagation} onWheelCapture={stopEventPropagation} style={{ display: 'flex', flexDirection: 'column', gap: full ? 12 : 8, height: '100%' }}>
+      {hiddenFile}
+      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' }}>
+        <button style={btn} onClick={() => fileRef.current?.click()} title="Импорт Excel/CSV">📥 Импорт</button>
+        <button style={{ ...btn, borderColor: '#34D399', color: '#34D399' }} onClick={exportXlsx} title="Сохранить как .xlsx">⬇ Excel</button>
+        <div style={{ flex: 1 }} />
+        <span style={{ fontSize: full ? 11.5 : 10, color: C.textDim }}>тяни границы — размер · тяни № строки — переставить · прокрути — бесконечно</span>
+      </div>
+      <div ref={scrollRef} className="flow-scroll" onScroll={onScroll} style={{ flex: 1, overflow: 'auto', border: `1px solid ${SHEET_GRID}`, borderRadius: 8 }}>
+        <table style={{ borderCollapse: 'collapse', fontFamily: NODE_MONO, fontSize: cellFs, userSelect: drag ? 'none' : undefined }}>
+          <thead>
+            <tr>
+              <th style={{ ...sheetCorner, width: 44, minWidth: 44 }} />
+              {Array.from({ length: cols }, (_, c) => {
+                const w = colWidth(c)
+                return (
+                  <th key={c} style={{ ...sheetHead, position: 'relative', width: w, minWidth: w, maxWidth: w, fontSize: full ? 13 : 11, padding: full ? '7px 10px' : '4px 7px' }}>
+                    {colName(c)}
+                    <div onPointerDown={(e) => startResize('col', c, e)} title="Тяни — ширина столбца" style={{ position: 'absolute', top: 0, right: -3, width: 7, height: '100%', cursor: 'col-resize', zIndex: 6 }} />
+                  </th>
+                )
+              })}
+            </tr>
+          </thead>
+          <tbody>
+            {Array.from({ length: rows }, (_, r) => {
+              const rh = rowHeight(r)
+              return (
+                <tr key={r} style={{ height: rh }}>
+                  <td
+                    onDragOver={(e) => { e.preventDefault(); setDropRow(r) }}
+                    onDragLeave={() => setDropRow((d) => (d === r ? null : d))}
+                    onDrop={(e) => { e.preventDefault(); const from = Number(e.dataTransfer.getData('text/sheet-row')); if (!isNaN(from)) moveRow(from, r); setDropRow(null) }}
+                    style={{ ...sheetRowHead, position: 'relative', padding: 0, width: 44, minWidth: 44, height: rh, fontSize: full ? 12 : 11, background: dropRow === r ? 'color-mix(in srgb, var(--accent) 26%, var(--panel2))' : 'var(--panel2)' }}
+                  >
+                    <span
+                      draggable
+                      onDragStart={(e) => { e.dataTransfer.setData('text/sheet-row', String(r)); e.dataTransfer.effectAllowed = 'move' }}
+                      title="Тяни — переставить строку"
+                      style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', height: '100%', cursor: 'grab' }}
+                    >
+                      {r + 1}
+                    </span>
+                    <div onPointerDown={(e) => startResize('row', r, e)} title="Тяни — высота строки" style={{ position: 'absolute', left: 0, bottom: -3, height: 7, width: '100%', cursor: 'row-resize', zIndex: 6 }} />
+                  </td>
+                  {Array.from({ length: cols }, (_, c) => {
+                    const w = colWidth(c)
+                    const key = `${r}:${c}`
+                    const raw = model.cells[key] ?? ''
+                    const isFormula = raw.startsWith('=')
+                    const disp = focus === key ? raw : String(compute(r, c) ?? '')
+                    const isNum = typeof compute(r, c) === 'number'
+                    const cellBg = focus === key
+                      ? 'color-mix(in srgb, var(--accent) 16%, transparent)'
+                      : r % 2
+                        ? 'color-mix(in srgb, var(--text) 4%, transparent)'
+                        : 'transparent'
+                    return (
+                      <td key={c} style={{ border: `1px solid ${SHEET_GRID}`, padding: 0, background: cellBg, width: w, minWidth: w, maxWidth: w, height: rh }}>
+                        <input
+                          value={disp}
+                          onFocus={() => setFocus(key)}
+                          onBlur={() => setFocus(null)}
+                          onChange={(e) => setCell(r, c, e.currentTarget.value)}
+                          style={{
+                            width: '100%',
+                            height: rh,
+                            boxSizing: 'border-box',
+                            border: 'none',
+                            outline: 'none',
+                            background: 'transparent',
+                            color: isFormula && focus !== key ? '#34D399' : C.text,
+                            padding: full ? '0 12px' : '0 7px',
+                            fontFamily: 'inherit',
+                            fontSize: cellFs,
+                            textAlign: isNum && focus !== key ? 'right' : 'left'
+                          }}
+                        />
+                      </td>
+                    )
+                  })}
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+      <div style={{ fontSize: full ? 12 : 10.5, color: C.textDim }}>Формулы: =A1+B1, =SUM(A1:A5), =AVG(B1:B3), =MAX(...)</div>
+    </div>
+  )
+}
+// Линии сетки — от цвета текста темы, поэтому видны и на тёмной, и на светлой теме
+// (на тёмной текст светлый → светлые линии; на светлой текст тёмный → тёмные линии).
+const SHEET_GRID = 'color-mix(in srgb, var(--text) 20%, transparent)'
+const sheetCorner = { position: 'sticky' as const, left: 0, top: 0, zIndex: 3, background: 'var(--panel2)', border: `1px solid ${SHEET_GRID}`, width: 30 }
+const sheetHead = { position: 'sticky' as const, top: 0, zIndex: 2, background: 'var(--panel2)', border: `1px solid ${SHEET_GRID}`, color: 'var(--text)', fontWeight: 600, padding: '4px 7px', fontSize: 11 }
+const sheetRowHead = { position: 'sticky' as const, left: 0, zIndex: 1, background: 'var(--panel2)', border: `1px solid ${SHEET_GRID}`, color: 'var(--muted)', textAlign: 'center' as const, padding: '4px 6px', fontSize: 11, minWidth: 30 }
+
 function NodeView({
   shape,
   editor,
@@ -4755,6 +7562,8 @@ function NodeView({
   const { color } = kindOf(kind)
   const [, force] = useState(0)
   const collapsed = collapsedMap.get(shape.id) ?? h <= HEADER_H + 6
+  const isSelected = useValue('sel-' + shape.id, () => editor.getSelectedShapeIds().includes(shape.id), [editor, shape.id])
+  const kindName = KIND_NAME[kind] || kind
 
   const toggleCollapse = (e: React.MouseEvent) => {
     stopEventPropagation(e)
@@ -4776,32 +7585,70 @@ function NodeView({
       <ContextPort editor={editor} sourceId={shape.id} color={color} />
 
       <div
+        className="flow-node-card"
         style={{
+          ['--nk' as string]: color,
+          position: 'relative',
           height: '100%',
           display: 'flex',
           flexDirection: 'column',
-          borderRadius: 10,
+          borderRadius: 12,
           overflow: 'hidden',
-          background: C.card,
+          background: 'linear-gradient(180deg, var(--panel2), var(--panel))',
           color: C.text,
-          border: `1px solid ${C.border}`,
-          boxShadow: '0 10px 30px rgba(0,0,0,0.4)'
-        }}
+          border: `1px solid ${isSelected ? `color-mix(in srgb, ${color} 55%, var(--border))` : 'var(--border)'}`,
+          boxShadow: isSelected
+            ? `0 14px 36px rgba(0,0,0,0.5), 0 0 0 1px color-mix(in srgb, ${color} 50%, transparent), 0 0 30px -2px color-mix(in srgb, ${color} 55%, transparent)`
+            : '0 10px 30px rgba(0,0,0,0.42), inset 0 1px 0 rgba(255,255,255,0.05)',
+          transition: 'box-shadow .18s ease, border-color .18s ease'
+        } as React.CSSProperties}
       >
+        {/* Верхняя акцентная полоса с бегущим бликом */}
+        <div
+          className="flow-accent-bar"
+          style={{
+            height: 2,
+            flexShrink: 0,
+            background: `linear-gradient(90deg, transparent, ${color}, color-mix(in srgb, ${color} 35%, transparent), ${color}, transparent)`
+          }}
+        />
+
         {/* Шапка (за неё двигаем ноду; двойной клик — редактировать заголовок) */}
         <div
           style={{
             display: 'flex',
             alignItems: 'center',
             gap: 8,
-            padding: '9px 12px',
+            padding: '8px 11px',
             flexShrink: 0,
             borderBottom: collapsed ? 'none' : `1px solid ${C.border}`
           }}
         >
-          <span style={{ color, display: 'flex', alignItems: 'center', flexShrink: 0 }}>
-            <NodeIcon kind={kind} size={15} />
-          </span>
+          {/* Анимированная плашка-бейдж: что за нода */}
+          <div
+            className="flow-badge"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 5,
+              flexShrink: 0,
+              padding: '2px 8px 2px 7px',
+              borderRadius: 999,
+              background: `color-mix(in srgb, ${color} 16%, transparent)`,
+              border: `1px solid color-mix(in srgb, ${color} 34%, transparent)`,
+              color,
+              font: `600 9.5px ${NODE_MONO}`,
+              letterSpacing: '.03em',
+              textTransform: 'uppercase',
+              lineHeight: 1
+            }}
+          >
+            <span className="flow-badge-dot" style={{ width: 5, height: 5, borderRadius: '50%', background: color, boxShadow: `0 0 6px ${color}`, flexShrink: 0 }} />
+            <span style={{ display: 'flex', alignItems: 'center' }}>
+              <NodeIcon kind={kind} size={12} />
+            </span>
+            <span style={{ whiteSpace: 'nowrap' }}>{kindName}</span>
+          </div>
           {isEditing ? (
             <input
               className="flow-input"
@@ -4869,15 +7716,27 @@ function NodeView({
 function NodeBodySwitch({
   shape,
   editor,
-  isEditing
+  isEditing,
+  full
 }: {
   shape: FlowNodeShape
   editor: Editor
   isEditing: boolean
+  full?: boolean
 }) {
   const kind = shape.props.kind
   return kind === 'ai' ? (
     <AiBody shape={shape} editor={editor} />
+  ) : kind === 'kanban' ? (
+    <KanbanBody shape={shape} editor={editor} />
+  ) : kind === 'board' ? (
+    <BoardBody shape={shape} editor={editor} />
+  ) : kind === 'list' ? (
+    <ListBody shape={shape} editor={editor} />
+  ) : kind === 'listcard' ? (
+    <ListCardBody shape={shape} editor={editor} />
+  ) : kind === 'sheet' ? (
+    <SheetBody shape={shape} editor={editor} full={full} />
   ) : kind === 'code' ? (
     <CodeRequestBody shape={shape} editor={editor} />
   ) : kind === 'codeblock' ? (
@@ -4902,6 +7761,12 @@ function NodeBodySwitch({
     <NotebookBody shape={shape} editor={editor} />
   ) : kind === 'pdf' ? (
     <PdfNodeBody shape={shape} editor={editor} />
+  ) : kind === 'orchestrator' ? (
+    <OrchestratorBody shape={shape} editor={editor} />
+  ) : kind === 'orchtask' ? (
+    <OrchTaskBody shape={shape} editor={editor} />
+  ) : kind === 'orchcall' ? (
+    <OrchCallBody shape={shape} />
   ) : kind === 'answer' ? (
     <AnswerBody shape={shape} editor={editor} />
   ) : (
@@ -4921,7 +7786,9 @@ export function NodeFullscreenOverlay({
   editor: Editor
   onClose: () => void
 }) {
-  const shape = editor.getShape(shapeId as never) as FlowNodeShape | undefined
+  // Подписываемся на шейп реактивно: оверлей — портал вне tldraw, и без этого он не
+  // ре-рендерится при updateShape → ввод в таблицу «не печатается» (input затирается).
+  const shape = useValue('fs-shape-' + shapeId, () => editor.getShape(shapeId as never) as FlowNodeShape | undefined, [editor, shapeId])
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       if (e.key === 'Escape') onClose()
@@ -4985,7 +7852,7 @@ export function NodeFullscreenOverlay({
         {shape.props.kind === 'slide' ? (
           <FullscreenSlide shape={shape} />
         ) : (
-          <NodeBodySwitch shape={shape} editor={editor} isEditing={false} />
+          <NodeBodySwitch shape={shape} editor={editor} isEditing={false} full />
         )}
       </div>
     </div>,

@@ -9,6 +9,10 @@ release/
 .DS_Store
 Thumbs.db
 
+# Cloudflare Wrangler (локальное состояние/логи sync-сервера)
+.wrangler/
+sync-server/.wrangler/
+
 # Планирование/служебное (не часть продукта)
 .planning/
 .agents/

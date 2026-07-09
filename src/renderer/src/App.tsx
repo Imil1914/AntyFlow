@@ -5,16 +5,19 @@ import {
   useValue,
   getSnapshot,
   loadSnapshot,
+  DefaultStylePanel,
   type Editor,
+  type TLAssetStore,
   type TLComponents
 } from 'tldraw'
+import { useSync } from '@tldraw/sync'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FlowNodeShapeUtil, NodeFullscreenOverlay, type FlowNodeShape } from './shapes/FlowNodeShapeUtil'
+import { FlowArrowShapeUtil, FlowNodeShapeUtil, NodeFullscreenOverlay, sheetModelFromFile, type FlowNodeShape } from './shapes/FlowNodeShapeUtil'
 import { DESIGN_CSS } from './slides/design'
 import SlideEditor from './slides/SlideEditor'
 import { OS_CSS, themeVars, THEME_ORDER, THEME_SWATCH, type ThemeName } from './os/theme'
 import { IconFiles, IconGraph, IconAgents, IconGen, IconSettings } from './os/icons'
-import { NodeIcon } from './os/nodeIcons'
+import { NodeIcon, GroupIcon } from './os/nodeIcons'
 import {
   Toast,
   CmdK,
@@ -25,16 +28,89 @@ import {
   MobileView,
   type Command
 } from './os/overlays'
+import { VaultView } from './vault/VaultView'
 
-const customShapeUtils = [FlowNodeShapeUtil]
+const customShapeUtils = [FlowNodeShapeUtil, FlowArrowShapeUtil]
+
+// Общая доска в режиме real-time: стор берём с sync-сервера (useSync), а не из
+// локального IndexedDB. Курсоры и правки других участников — из коробки.
+function SharedBoard({
+  uri,
+  components,
+  onMount
+}: {
+  uri: string
+  components: TLComponents
+  onMount: (ed: Editor) => void
+}) {
+  const store = useSync({ uri, assets: flowAssetStore, shapeUtils: customShapeUtils })
+  return (
+    <Tldraw
+      store={store}
+      shapeUtils={customShapeUtils}
+      components={components}
+      cameraOptions={{ wheelBehavior: 'zoom' }}
+      onMount={onMount}
+    />
+  )
+}
 
 const SANS = "'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif"
 const MONO = "'JetBrains Mono', monospace"
 
+// Сворачиваемая панель стилей tldraw: по умолчанию скрыта, разворачивается кнопкой 🎨.
+function CollapsibleStylePanel() {
+  const [open, setOpen] = useState(false)
+  return (
+    <div style={{ display: 'flex', flexDirection: 'column', alignItems: 'flex-end', gap: 6, pointerEvents: 'all' }}>
+      <button
+        className="os-btn"
+        title={open ? 'Скрыть стили' : 'Стили фигуры'}
+        onClick={() => setOpen((v) => !v)}
+        style={{
+          width: 34,
+          height: 34,
+          borderRadius: 9,
+          border: '1px solid var(--border)',
+          background: 'var(--panel)',
+          color: open ? 'var(--accent)' : 'var(--muted)',
+          cursor: 'pointer',
+          fontSize: 16,
+          display: 'grid',
+          placeItems: 'center'
+        }}
+      >
+        🎨
+      </button>
+      {open && <DefaultStylePanel />}
+    </div>
+  )
+}
+
 // --- Доски (каждая — свой ключ персиста tldraw) ---
-type Board = { id: string; name: string; key: string }
+// shared/roomId — режим real-time совместной работы через sync-сервер (Cloudflare).
+type Board = { id: string; name: string; key: string; shared?: boolean; roomId?: string }
 const BOARDS_LS = 'flow-boards'
 const CURRENT_LS = 'flow-current-board'
+const SYNC_SERVER_LS = 'flow-sync-server' // базовый URL sync-сервера (wss://…)
+
+// Инлайновое хранилище ассетов для sync: картинки/файлы кодируются в data-URL прямо
+// в документе. Для нашего сценария (личный круг) этого достаточно; тяжёлые медиа
+// стоит хранить в R2/S3 отдельным asset store.
+const flowAssetStore: TLAssetStore = {
+  async upload(_asset, file) {
+    const src = await new Promise<string>((resolve, reject) => {
+      const r = new FileReader()
+      r.onload = () => resolve(String(r.result))
+      r.onerror = () => reject(r.error)
+      r.readAsDataURL(file)
+    })
+    return { src }
+  },
+  resolve(asset) {
+    return asset.props.src
+  }
+}
 function loadBoards(): Board[] {
   try {
     const b = JSON.parse(localStorage.getItem(BOARDS_LS) || 'null')
@@ -61,6 +137,10 @@ const boardMenuBtn = (color: string): React.CSSProperties => ({
 const SIDEBAR_CHIPS = [
   { kind: 'note', title: 'Заметка', label: 'Md', color: 'var(--c-note)' },
   { kind: 'ai', title: 'ИИ-ассистент', label: 'ИИ', color: 'var(--c-chat)' },
+  { kind: 'list', title: 'Список', label: 'Сп', color: 'var(--c-code)' },
+  { kind: 'kanban', title: 'Канбан-доска', label: 'Кб', color: 'var(--c-chat)' },
+  { kind: 'board', title: 'Бэклог (мультиканбан)', label: 'Бэ', color: 'var(--c-chat)' },
+  { kind: 'sheet', title: 'Таблица', label: 'Тб', color: 'var(--c-note)' },
   { kind: 'code', title: 'Код', label: '{}', color: 'var(--c-code)' },
   { kind: 'search', title: 'Поиск', label: 'Пс', color: 'var(--c-chat)' },
   { kind: 'image', title: 'Изображение', label: 'Из', color: 'var(--c-img)' },
@@ -71,8 +151,23 @@ const SIDEBAR_CHIPS = [
   { kind: 'opencode', title: 'OpenCode', label: 'OC', color: 'var(--c-code)' },
   { kind: 'anythingllm', title: 'AnythingLLM', label: 'AL', color: 'var(--c-chat)' },
   { kind: 'openscience', title: 'OpenScience', label: 'OS', color: 'var(--c-chat)' },
-  { kind: 'notebook', title: 'Jupyter-ноутбук', label: 'Jp', color: 'var(--c-code)' }
+  { kind: 'notebook', title: 'Jupyter-ноутбук', label: 'Jp', color: 'var(--c-code)' },
+  { kind: 'orchestrator', title: 'Оркестратор', label: '🕸', color: 'var(--c-img)' }
 ]
+
+// Категории нод: клик по иконке категории → всплывающая плашка с типами нод.
+const NODE_GROUPS: Array<{ id: string; title: string; subtitle: string; icon: string; kinds: string[] }> = [
+  { id: 'assist', title: 'Ассистент', subtitle: 'Заметки, ИИ-чат и поиск', icon: 'ai', kinds: ['note', 'ai', 'search'] },
+  { id: 'docs', title: 'Документы и текст', subtitle: 'Документы, таблицы, списки, канбан, бэклог, схемы и презентации', icon: 'doc', kinds: ['list', 'kanban', 'board', 'doc', 'sheet', 'diagram', 'deck'] },
+  { id: 'code', title: 'Код и данные', subtitle: 'Python-код и Jupyter-ноутбук', icon: 'code', kinds: ['code', 'notebook'] },
+  { id: 'media', title: 'Медиа', subtitle: 'Генерация картинок и референсы', icon: 'image', kinds: ['image', 'ref'] },
+  { id: 'agents', title: 'ИИ-агенты', subtitle: 'OpenCode, OpenScience, AnythingLLM', icon: 'opencode', kinds: ['opencode', 'openscience', 'anythingllm'] }
+]
+// Ноды-одиночки (без группы) — прямой чип в сайдбаре.
+const STANDALONE_NODES = ['orchestrator']
+const chipOf = (kind: string) => SIDEBAR_CHIPS.find((c) => c.kind === kind)
+const chipTitle = (kind: string): string => chipOf(kind)?.title ?? kind
+const chipColor = (kind: string): string | undefined => chipOf(kind)?.color
 
 type Provider = {
   id: string
@@ -104,6 +199,10 @@ const MCP_STATUS: Record<string, { label: string; color: string }> = {
 
 // Глобальные стили нод (классы flow-*, рендер Markdown)
 const GLOBAL_CSS = `
+  .os-flyout { animation: flyin .14s cubic-bezier(.2,.8,.2,1) both; }
+  @keyframes flyin { from { opacity: 0; transform: translateX(-6px) scale(.98) } to { opacity: 1; transform: none } }
+  .os-flyout-item:hover { background: color-mix(in srgb, var(--text) 8%, transparent); }
+  .os-flyout-item:active { transform: scale(.98); }
   .flow-run-btn:hover:not(:disabled) { filter: brightness(1.09); }
   .flow-run-btn:active:not(:disabled) { transform: translateY(1px); }
   .flow-mini-btn:hover { background: rgba(255,255,255,0.16) !important; color: var(--text) !important; }
@@ -185,7 +284,10 @@ const KIND_COLORS: Record<string, string> = {
   answer: 'var(--c-img)',
   deck: 'var(--c-media)',
   diagram: 'var(--c-chat)',
-  slide: 'var(--muted)'
+  slide: 'var(--muted)',
+  orchestrator: 'var(--c-img)',
+  orchtask: 'var(--c-img)',
+  orchcall: 'var(--c-chat)'
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -300,6 +402,62 @@ function StatusBar({
 }) {
   const zoom = useValue('zoom', () => (editor ? editor.getZoomLevel() : 1), [editor])
   const sep = <span style={{ width: 1, height: 12, background: 'var(--border)' }} />
+
+  // Реальные данные: модель по умолчанию, GPU-память, статус сервисов/провайдеров.
+  const [model, setModel] = useState('')
+  const [provName, setProvName] = useState('')
+  const [isLocal, setIsLocal] = useState(true)
+  const [cloudCount, setCloudCount] = useState(0)
+  const [gpu, setGpu] = useState<{ name: string; usedMB: number; totalMB: number } | null>(null)
+  const [svc, setSvc] = useState<{ comfy: boolean; lm: boolean } | null>(null)
+
+  useEffect(() => {
+    let alive = true
+    const isLoc = (url: string) => /127\.0\.0\.1|localhost/.test(url || '')
+    const loadModel = async () => {
+      try {
+        const [s, provs] = await Promise.all([window.flow.getSettings(), window.flow.getProviders()])
+        if (!alive) return
+        const chosen = s.defaultModel || ''
+        const [pid, ...rest] = chosen.includes('::') ? chosen.split('::') : ['lmstudio', chosen]
+        const prov = provs.find((p) => p.id === pid)
+        setModel(rest.join('::') || chosen)
+        setProvName(prov?.name || pid)
+        setIsLocal(!!prov && isLoc(prov.baseURL))
+        setCloudCount(provs.filter((p) => p.enabled && !isLoc(p.baseURL)).length)
+      } catch {
+        /* ignore */
+      }
+    }
+    const poll = async () => {
+      try {
+        const g = await window.flow.sysGpu()
+        if (alive) setGpu(g.ok ? g : null)
+      } catch {
+        if (alive) setGpu(null)
+      }
+      try {
+        const st = await window.flow.servicesStatus()
+        if (alive) setSvc(st)
+      } catch {
+        /* ignore */
+      }
+    }
+    loadModel()
+    poll()
+    const t1 = setInterval(poll, 5000)
+    const t2 = setInterval(loadModel, 8000)
+    return () => {
+      alive = false
+      clearInterval(t1)
+      clearInterval(t2)
+    }
+  }, [])
+
+  const vramFrac = gpu ? gpu.usedMB / gpu.totalMB : 0
+  const dot = (on: boolean) => (
+    <span style={{ width: 6, height: 6, borderRadius: '50%', background: on ? 'var(--c-note)' : 'var(--muted)' }} />
+  )
   return (
     <div
       style={{
@@ -316,31 +474,60 @@ function StatusBar({
         zIndex: 20
       }}
     >
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--c-note)' }} />
-        Llama 3.1 70B · локально
+      {/* Модель по умолчанию (реальная) */}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Модель по умолчанию (⚙ Настройки)">
+        {dot(!!model)}
+        {model ? `${model} · ${isLocal ? 'локально' : provName}` : 'модель не выбрана'}
       </span>
       {sep}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        VRAM 18.4/24 ГБ
-        <span
-          style={{
-            width: 56,
-            height: 4,
-            background: 'var(--bg)',
-            borderRadius: 2,
-            overflow: 'hidden',
-            display: 'inline-block'
-          }}
-        >
-          <span style={{ display: 'block', width: '77%', height: '100%', background: 'var(--accent)' }} />
+      {/* Видеопамять GPU (реальная, nvidia-smi) */}
+      {gpu ? (
+        <span style={{ display: 'flex', alignItems: 'center', gap: 6 }} title={gpu.name}>
+          VRAM {(gpu.usedMB / 1024).toFixed(1)}/{(gpu.totalMB / 1024).toFixed(0)} ГБ
+          <span
+            style={{
+              width: 56,
+              height: 4,
+              background: 'var(--bg)',
+              borderRadius: 2,
+              overflow: 'hidden',
+              display: 'inline-block'
+            }}
+          >
+            <span
+              style={{
+                display: 'block',
+                width: `${Math.min(100, vramFrac * 100)}%`,
+                height: '100%',
+                background: vramFrac > 0.9 ? '#F87171' : 'var(--accent)'
+              }}
+            />
+          </span>
         </span>
+      ) : (
+        <span style={{ color: 'var(--muted)' }} title="nvidia-smi недоступен">
+          GPU: н/д
+        </span>
+      )}
+      {sep}
+      {/* Подключённые платформы (реальные) */}
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="LM Studio (127.0.0.1:1234)">
+        {dot(!!svc?.lm)}
+        LM Studio · {svc?.lm ? 'работает' : 'ожидание'}
       </span>
       {sep}
-      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-        <span style={{ width: 6, height: 6, borderRadius: '50%', background: 'var(--c-note)' }} />
-        ComfyUI · ожидание
+      <span style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="ComfyUI (127.0.0.1:8188)">
+        {dot(!!svc?.comfy)}
+        ComfyUI · {svc?.comfy ? 'работает' : 'ожидание'}
       </span>
+      {cloudCount > 0 && (
+        <>
+          {sep}
+          <span style={{ display: 'flex', alignItems: 'center', gap: 6 }} title="Включённые облачные провайдеры">
+            {dot(true)}☁ {cloudCount}
+          </span>
+        </>
+      )}
       <div style={{ flex: 1 }} />
       <span>{Math.round(zoom * 100)}%</span>
       {sep}
@@ -746,24 +933,44 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 // Размеры новой ноды по типу
 function sizeFor(kind: string): { w: number; h: number } {
   const h =
-    kind === 'notebook'
+    kind === 'orchestrator'
+      ? 620
+      : kind === 'notebook'
       ? 600
       : kind === 'pdf'
       ? 620
+      : kind === 'kanban'
+      ? 460
+      : kind === 'board'
+      ? 720
+      : kind === 'listcard'
+      ? 520
+      : kind === 'sheet'
+      ? 380
       : kind === 'openscience'
       ? 460
       : kind === 'anythingllm'
       ? 460
       : kind === 'diagram'
       ? 380
-      : kind === 'ai' || kind === 'search' || kind === 'image' || kind === 'deck' || kind === 'opencode'
+      : kind === 'ai' || kind === 'search' || kind === 'image' || kind === 'deck' || kind === 'opencode' || kind === 'list'
         ? 340
         : kind === 'code'
           ? 240
           : 180
   const w =
-    kind === 'notebook'
+    kind === 'orchestrator'
+      ? 460
+      : kind === 'notebook'
       ? 640
+      : kind === 'kanban'
+      ? 1000
+      : kind === 'board'
+      ? 1120
+      : kind === 'listcard'
+      ? 940
+      : kind === 'sheet'
+      ? 620
       : kind === 'openscience'
       ? 560
       : kind === 'pdf'
@@ -775,7 +982,8 @@ function sizeFor(kind: string): { w: number; h: number } {
     kind === 'deck' ||
     kind === 'diagram' ||
     kind === 'opencode' ||
-    kind === 'anythingllm'
+    kind === 'anythingllm' ||
+    kind === 'list'
       ? 320
       : kind === 'ref'
         ? 240
@@ -785,7 +993,19 @@ function sizeFor(kind: string): { w: number; h: number } {
 
 export default function App() {
   const [editor, setEditor] = useState<Editor | null>(null)
-  const [theme, setTheme] = useState<ThemeName>('Графит')
+  const [theme, setTheme] = useState<ThemeName>(() => {
+    const saved = localStorage.getItem('flow-theme') as ThemeName | null
+    return saved && THEME_ORDER.includes(saved) ? saved : 'Графит'
+  })
+  useEffect(() => {
+    localStorage.setItem('flow-theme', theme)
+    // Переменные темы кладём и на :root, чтобы их наследовали ПОРТАЛЫ (полноэкранный
+    // режим ноды, меню и т.п. рендерятся в document.body — вне корневого div со стилями).
+    const root = document.documentElement
+    for (const [k, v] of Object.entries(themeVars(theme))) {
+      if (k.startsWith('--')) root.style.setProperty(k, String(v))
+    }
+  }, [theme])
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [editSlideId, setEditSlideId] = useState<string | null>(null)
 
@@ -797,6 +1017,20 @@ export default function App() {
   const [boardMenu, setBoardMenu] = useState(false)
   const importInputRef = useRef<HTMLInputElement>(null)
   const board = boards.find((b) => b.id === currentBoardId) || boards[0]
+  // URL sync-сервера (общий для всех досок этого устройства). По умолчанию —
+  // задеплоенный воркер владельца; можно сменить через «⚙ Сервер синхронизации».
+  const [syncServer, setSyncServer] = useState<string>(
+    () => localStorage.getItem(SYNC_SERVER_LS) || 'wss://flow-sync.untrioir.workers.dev'
+  )
+  useEffect(() => {
+    localStorage.setItem(SYNC_SERVER_LS, syncServer)
+  }, [syncServer])
+  // Полный адрес комнаты доски на sync-сервере (wss://…/connect/<roomId>)
+  const roomUri = (b: Board): string => {
+    if (!b.shared || !b.roomId || !syncServer) return ''
+    const base = syncServer.replace(/\/+$/, '')
+    return `${base}/connect/${encodeURIComponent(b.roomId)}`
+  }
 
   useEffect(() => {
     localStorage.setItem(BOARDS_LS, JSON.stringify(boards))
@@ -804,6 +1038,147 @@ export default function App() {
   useEffect(() => {
     localStorage.setItem(CURRENT_LS, currentBoardId)
   }, [currentBoardId])
+
+  // --- Файловая синхронизация холстов через папку Vault ---
+  // Снимок каждого холста пишется в `<vault>/.flow-canvas/<key>.json`; если Vault
+  // указывает на облачную папку — холсты синхронизируются между устройствами.
+  // Конфликты — last-write-wins по updatedAt. IndexedDB tldraw остаётся локальным
+  // рабочим кэшем, файлы — слой синхронизации поверх него.
+  const syncStamps = useRef<Record<string, number>>(
+    (() => {
+      try {
+        return JSON.parse(localStorage.getItem('flow-canvas-stamps') || '{}')
+      } catch {
+        return {}
+      }
+    })()
+  )
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const suppressSave = useRef(false)
+  const boardsReady = useRef(false)
+  const persistStamps = () => {
+    try {
+      localStorage.setItem('flow-canvas-stamps', JSON.stringify(syncStamps.current))
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const pullCanvas = useCallback(async (ed: Editor, key: string) => {
+    try {
+      const res = await window.flow?.canvasRead({ key })
+      if (!res || !res.snapshot) return
+      if (res.updatedAt > (syncStamps.current[key] ?? 0)) {
+        suppressSave.current = true
+        loadSnapshot(ed.store, res.snapshot as never)
+        syncStamps.current[key] = res.updatedAt
+        persistStamps()
+        setTimeout(() => {
+          suppressSave.current = false
+        }, 1000)
+      }
+    } catch {
+      /* ignore */
+    }
+  }, [])
+
+  const scheduleSaveCanvas = useCallback((ed: Editor, key: string, name: string) => {
+    if (saveTimer.current) clearTimeout(saveTimer.current)
+    saveTimer.current = setTimeout(async () => {
+      if (suppressSave.current) return
+      try {
+        const snap = getSnapshot(ed.store)
+        const ts = Date.now()
+        const r = await window.flow?.canvasWrite({ key, snapshot: snap, updatedAt: ts, name })
+        if (r && r.ok) {
+          syncStamps.current[key] = ts
+          persistStamps()
+        }
+      } catch {
+        /* ignore */
+      }
+    }, 1500)
+  }, [])
+
+  // Общий обработчик монтирования редактора (и для локальной, и для общей доски).
+  // Для общих досок файловый синк отключаем — источник истины там сервер.
+  const handleMount = useCallback(
+    (ed: Editor, b: Board) => {
+      setEditor(ed)
+      try {
+        ed.user.updateUserPreferences({ colorScheme: 'dark' })
+      } catch {
+        /* не критично */
+      }
+      try {
+        ed.sideEffects.registerAfterDeleteHandler('shape', (rec) => {
+          const r = rec as unknown as { type?: string; id?: string; props?: { kind?: string } }
+          if (r?.type === 'flow-node' && r?.props?.kind === 'codeblock' && r.id) {
+            window.flow?.killCode({ id: r.id })
+          }
+        })
+      } catch {
+        /* не критично */
+      }
+      if (b.shared) return // общая доска: синхронизирует сервер, файловый синк не нужен
+      const bKey = b.key
+      const bName = b.name
+      setTimeout(() => pullCanvas(ed, bKey), 700)
+      try {
+        ed.store.listen(() => scheduleSaveCanvas(ed, bKey, bName), { source: 'user', scope: 'document' })
+      } catch {
+        /* API отличается — не критично */
+      }
+    },
+    [pullCanvas, scheduleSaveCanvas]
+  )
+
+  // Список досок: при старте подтянуть из файла (если он новее), дальше — писать при изменениях.
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      try {
+        const res = await window.flow?.canvasBoardsRead()
+        if (!cancelled && res && Array.isArray(res.boards) && res.boards.length) {
+          const localTs = Number(localStorage.getItem('flow-boards-stamp') || '0')
+          if (res.updatedAt > localTs) {
+            setBoards(res.boards)
+            localStorage.setItem('flow-boards-stamp', String(res.updatedAt))
+          }
+        }
+      } catch {
+        /* ignore */
+      } finally {
+        boardsReady.current = true
+      }
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  useEffect(() => {
+    if (!boardsReady.current) return
+    const ts = Date.now()
+    localStorage.setItem('flow-boards-stamp', String(ts))
+    window.flow?.canvasBoardsWrite({ boards, updatedAt: ts })
+  }, [boards])
+
+  // Когда окно снова в фокусе — проверить, не появился ли на другом устройстве более
+  // свежий снимок текущего холста (облако мог его подтянуть).
+  useEffect(() => {
+    const onFocus = () => {
+      if (editor && board) pullCanvas(editor, board.key)
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [editor, board, pullCanvas])
+
+  // Смена доски — сбросить отложенное сохранение прошлого холста.
+  useEffect(() => {
+    return () => {
+      if (saveTimer.current) clearTimeout(saveTimer.current)
+    }
+  }, [board?.key])
 
   const newBoard = () => {
     const id = 'b' + Date.now().toString(36)
@@ -816,11 +1191,66 @@ export default function App() {
     setBoards((x) => x.map((b) => (b.id === currentBoardId ? { ...b, name } : b)))
   const deleteBoard = () => {
     if (boards.length <= 1) return
+    const gone = boards.find((b) => b.id === currentBoardId)
     const rest = boards.filter((b) => b.id !== currentBoardId)
     setBoards(rest)
     setCurrentBoardId(rest[0].id)
     setBoardMenu(false)
+    if (gone) {
+      delete syncStamps.current[gone.key]
+      persistStamps()
+      window.flow?.canvasRemove({ key: gone.key })
+    }
   }
+
+  // --- Общий доступ к доске (real-time через sync-сервер) ---
+  const askServer = (): string | null => {
+    const v = window.prompt(
+      'Адрес sync-сервера (wss://…).\nНапример: wss://flow-sync.ТВОЙ-АккаунТ.workers.dev',
+      syncServer
+    )
+    if (v == null) return null
+    const t = v.trim()
+    setSyncServer(t)
+    return t
+  }
+  const makeShared = () => {
+    let srv = syncServer
+    if (!srv) {
+      const v = askServer()
+      if (!v) return
+      srv = v
+    }
+    const roomId = board.roomId || 'room-' + Math.random().toString(36).slice(2, 10)
+    setBoards((x) => x.map((b) => (b.id === currentBoardId ? { ...b, shared: true, roomId } : b)))
+    setBoardMenu(false)
+    setToast('Доска общая. ID комнаты: ' + roomId)
+  }
+  const unshareBoard = () => {
+    setBoards((x) => x.map((b) => (b.id === currentBoardId ? { ...b, shared: false } : b)))
+    setBoardMenu(false)
+  }
+  const joinShared = () => {
+    let srv = syncServer
+    if (!srv) {
+      const v = askServer()
+      if (!v) return
+      srv = v
+    }
+    const roomId = window.prompt('ID комнаты общей доски (его даёт владелец):', '')?.trim()
+    if (!roomId) return
+    const id = 'b' + Date.now().toString(36)
+    setBoards((x) => [...x, { id, name: 'Общая доска', key: 'flow-board-' + id, shared: true, roomId }])
+    setCurrentBoardId(id)
+    setBoardMenu(false)
+  }
+  const copyRoomId = () => {
+    if (board.roomId) {
+      navigator.clipboard?.writeText(board.roomId)
+      setToast('ID комнаты скопирован: ' + board.roomId)
+    }
+  }
+
   const exportBoard = () => {
     if (!editor) return
     try {
@@ -852,7 +1282,10 @@ export default function App() {
   const [graphOpen, setGraphOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
+  const [vaultOpen, setVaultOpen] = useState(false)
+  const [flyout, setFlyout] = useState<{ id: string; top: number } | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
+  const [sidebarOpen, setSidebarOpen] = useState(false) // раздвижной сайдбар
   const [toast, setToast] = useState<string | null>(null)
 
   const showToast = useCallback((msg: string) => {
@@ -875,6 +1308,21 @@ export default function App() {
     window.addEventListener('flow-fullscreen-node', h)
     return () => window.removeEventListener('flow-fullscreen-node', h)
   }, [])
+
+  // Закрытие всплывающей плашки категории по клику вне неё / Esc
+  useEffect(() => {
+    if (!flyout) return
+    const close = (): void => setFlyout(null)
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') setFlyout(null)
+    }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [flyout])
 
   const addNode = useCallback(
     (kind: string, title: string, screenPt?: { x: number; y: number }) => {
@@ -905,6 +1353,7 @@ export default function App() {
       const IMG = /\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif|ico|tiff?)$/i
       const PDF = /\.pdf$/i
       const DOCX = /\.(docx|pptx)$/i
+      const SHEET = /\.(xlsx|xls|csv)$/i
       const off = idx * 26
       const mkNode = (kind: string, extraProps: Record<string, unknown>, title: string): void => {
         const id = createShapeId()
@@ -948,6 +1397,11 @@ export default function App() {
           }
         }
         r.readAsDataURL(file)
+      } else if (SHEET.test(file.name)) {
+        // Excel/CSV → нода-таблица с данными
+        sheetModelFromFile(file)
+          .then((model) => mkNode('sheet', { title: file.name.replace(SHEET, ''), extra: JSON.stringify({ sheet: model }) }, file.name))
+          .catch((e) => mkNode('doc', { body: `[Не удалось прочитать таблицу «${file.name}»: ${String(e)}]` }, file.name))
       } else {
         r.onload = () => mkNode('doc', { body: String(r.result || '').slice(0, 40000) }, file.name)
         r.readAsText(file)
@@ -1080,6 +1534,7 @@ export default function App() {
       { label: 'Тема: Графит', hint: 'стиль', run: () => setTheme('Графит') },
       { label: 'Тема: Обсидиан', hint: 'стиль', run: () => setTheme('Обсидиан') },
       { label: 'Тема: Тёплый уголь', hint: 'стиль', run: () => setTheme('Тёплый уголь') },
+      { label: 'Тема: Светлая', hint: 'стиль', run: () => setTheme('Светлая') },
       { label: 'Приблизить к ноде · 100% (Shift+F)', hint: 'вид', run: () => zoomToSelectedNode() }
     ],
     [addNode, zoomToSelectedNode]
@@ -1091,6 +1546,7 @@ export default function App() {
     () =>
       ({
         Background: DotGridBackground,
+        StylePanel: CollapsibleStylePanel,
         PageMenu: null,
         NavigationPanel: null,
         MainMenu: null,
@@ -1110,31 +1566,59 @@ export default function App() {
     []
   )
 
-  // Иконка вкладки сайдбара
-  const tabBtn = (
-    title: string,
-    active: boolean,
-    onClick: () => void,
+  // Элемент раздвижного сайдбара: иконка (+ подпись, когда панель развёрнута).
+  const RailItem = ({
+    icon,
+    label,
+    title,
+    active,
+    color,
+    onClick,
+    dragKind
+  }: {
     icon: React.ReactNode
-  ) => (
-    <button
-      className="os-btn os-tab"
-      title={title}
-      onClick={onClick}
-      style={{
-        width: 34,
-        height: 34,
-        border: 'none',
-        borderRadius: 8,
-        background: active ? 'var(--accent-dim)' : 'transparent',
-        color: active ? 'var(--accent)' : 'var(--muted)',
-        display: 'grid',
-        placeItems: 'center'
-      }}
-    >
-      {icon}
-    </button>
-  )
+    label: string
+    title?: string
+    active?: boolean
+    color?: string
+    onClick?: (e: React.MouseEvent) => void
+    dragKind?: string
+  }) => {
+    const iconColor = color ?? (active ? 'var(--accent)' : 'var(--muted)')
+    return (
+      <div
+        className={'os-btn os-rail' + (dragKind ? ' os-chip' : '')}
+        title={title ?? label}
+        draggable={!!dragKind}
+        onDragStart={dragKind ? (e) => e.dataTransfer.setData('text/plain', dragKind) : undefined}
+        onClick={onClick}
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 11,
+          height: 38,
+          width: '100%',
+          borderRadius: 9,
+          flex: '0 0 auto',
+          padding: sidebarOpen ? '0 9px' : 0,
+          justifyContent: sidebarOpen ? 'flex-start' : 'center',
+          background: active ? 'var(--accent-dim)' : 'transparent'
+        }}
+      >
+        <span style={{ width: 22, flex: '0 0 auto', display: 'grid', placeItems: 'center', color: iconColor }}>
+          {icon}
+        </span>
+        {sidebarOpen && (
+          <span
+            className="os-rail-label"
+            style={{ font: `500 12.5px ${SANS}`, color: active ? 'var(--accent)' : 'var(--text)' }}
+          >
+            {label}
+          </span>
+        )}
+      </div>
+    )
+  }
 
   return (
     <div
@@ -1156,68 +1640,104 @@ export default function App() {
 
       {/* Основной ряд: сайдбар + холст */}
       <div style={{ flex: 1, display: 'flex', minHeight: 0 }}>
-        {/* Сайдбар */}
+        {/* Сайдбар (раздвижной) */}
         <div
           className="os-scroll"
           style={{
-            width: 52,
+            width: sidebarOpen ? 214 : 56,
             flex: 'none',
             display: 'flex',
             flexDirection: 'column',
-            alignItems: 'center',
-            gap: 6,
-            padding: '10px 0',
+            gap: 3,
+            padding: 8,
             background: 'var(--panel)',
             borderRight: '1px solid var(--border)',
             overflowY: 'auto',
+            overflowX: 'hidden',
+            transition: 'width .18s ease',
             zIndex: 20
           }}
         >
-          <div
-            title="Персональная ОС"
+          {/* Заголовок + переключатель свернуть/развернуть */}
+          <button
+            className="os-btn"
+            onClick={() => setSidebarOpen((v) => !v)}
+            title={sidebarOpen ? 'Свернуть панель' : 'Развернуть панель'}
             style={{
-              width: 26,
-              height: 26,
-              marginBottom: 8,
-              background: 'var(--accent-dim)',
-              border: '1px solid var(--accent)',
-              borderRadius: 7,
-              display: 'grid',
-              placeItems: 'center',
-              color: 'var(--accent)',
-              font: `600 11px ${MONO}`
+              display: 'flex',
+              alignItems: 'center',
+              height: 40,
+              width: '100%',
+              border: 'none',
+              background: 'transparent',
+              cursor: 'pointer',
+              padding: sidebarOpen ? '0 8px' : 0,
+              justifyContent: sidebarOpen ? 'space-between' : 'center',
+              marginBottom: 4
             }}
           >
-            ОС
-          </div>
-          {tabBtn('Файлы', true, () => showToast('Панель «Файлы» — скоро'), <IconFiles />)}
-          {tabBtn('Граф знаний', false, () => setGraphOpen(true), <IconGraph />)}
-          {tabBtn('Агенты', false, () => setAgentsOpen(true), <IconAgents />)}
-          {tabBtn('Генеративная студия', false, () => setGenOpen(true), <IconGen />)}
-          {tabBtn('Настройки', false, () => setSettingsOpen(true), <IconSettings />)}
-          <div style={{ width: 24, height: 1, background: 'var(--border)', margin: '8px 0' }} />
-          <div style={{ font: `500 8.5px ${MONO}`, color: 'var(--muted)', letterSpacing: '.06em' }}>НОДЫ</div>
-          {SIDEBAR_CHIPS.map((c) => (
-            <div
-              key={c.kind}
-              className="os-chip"
-              title={`Перетащите на холст: ${c.title}`}
-              draggable
-              onDragStart={(e) => e.dataTransfer.setData('text/plain', c.kind)}
-              onClick={() => addNode(c.kind, c.title)}
-              style={{
-                width: 34,
-                height: 34,
-                borderRadius: 8,
-                background: 'var(--panel2)',
-                border: '1px dashed var(--border)',
-                display: 'grid',
-                placeItems: 'center',
-                color: c.color
-              }}
-            >
-              <NodeIcon kind={c.kind} size={17} />
+            {sidebarOpen && (
+              <span style={{ display: 'flex', alignItems: 'center', gap: 9 }}>
+                <span
+                  style={{
+                    width: 26,
+                    height: 26,
+                    background: 'var(--accent-dim)',
+                    border: '1px solid var(--accent)',
+                    borderRadius: 7,
+                    display: 'grid',
+                    placeItems: 'center',
+                    color: 'var(--accent)',
+                    font: `600 11px ${MONO}`
+                  }}
+                >
+                  ОС
+                </span>
+                <span style={{ font: `600 14px ${SANS}`, color: 'var(--text)' }}>Flow</span>
+              </span>
+            )}
+            <span style={{ font: `600 16px ${MONO}`, color: 'var(--muted)', width: 22, display: 'grid', placeItems: 'center' }}>
+              {sidebarOpen ? '«' : '»'}
+            </span>
+          </button>
+
+          <RailItem icon={<IconFiles />} label="Заметки" active onClick={() => setVaultOpen(true)} />
+          <RailItem icon={<IconGraph />} label="Граф знаний" onClick={() => setGraphOpen(true)} />
+          <RailItem icon={<IconAgents />} label="Агенты" onClick={() => setAgentsOpen(true)} />
+          <RailItem icon={<IconGen />} label="Генеративная студия" onClick={() => setGenOpen(true)} />
+          <RailItem icon={<IconSettings />} label="Настройки" onClick={() => setSettingsOpen(true)} />
+
+          <div style={{ height: 1, background: 'var(--border)', margin: '8px 4px' }} />
+          {sidebarOpen && (
+            <div style={{ font: `600 9px ${MONO}`, color: 'var(--muted)', letterSpacing: '.08em', padding: '0 9px 3px' }}>
+              НОДЫ
             </div>
+          )}
+
+          {NODE_GROUPS.map((g) => (
+            <RailItem
+              key={g.id}
+              icon={<GroupIcon id={g.id} size={18} />}
+              label={g.title}
+              title={g.title}
+              active={flyout?.id === g.id}
+              onClick={(e) => {
+                e.stopPropagation()
+                const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+                setFlyout((f) => (f?.id === g.id ? null : { id: g.id, top: rect.top }))
+              }}
+            />
+          ))}
+          {STANDALONE_NODES.map((kind) => (
+            <RailItem
+              key={kind}
+              icon={<NodeIcon kind={kind} size={18} />}
+              label={chipTitle(kind)}
+              title={`Перетащите на холст: ${chipTitle(kind)}`}
+              color={chipColor(kind)}
+              dragKind={kind}
+              onClick={() => addNode(kind, chipTitle(kind))}
+            />
           ))}
         </div>
 
@@ -1251,31 +1771,23 @@ export default function App() {
               e.currentTarget.value = ''
             }}
           />
-          <Tldraw
-            key={board.key}
-            persistenceKey={board.key}
-            shapeUtils={customShapeUtils}
-            components={components}
-            cameraOptions={{ wheelBehavior: 'zoom' }}
-            onMount={(ed) => {
-              setEditor(ed)
-              try {
-                ed.user.updateUserPreferences({ colorScheme: 'dark' })
-              } catch {
-                /* не критично */
-              }
-              try {
-                ed.sideEffects.registerAfterDeleteHandler('shape', (rec) => {
-                  const r = rec as unknown as { type?: string; id?: string; props?: { kind?: string } }
-                  if (r?.type === 'flow-node' && r?.props?.kind === 'codeblock' && r.id) {
-                    window.flow?.killCode({ id: r.id })
-                  }
-                })
-              } catch {
-                /* не критично */
-              }
-            }}
-          />
+          {board.shared && roomUri(board) ? (
+            <SharedBoard
+              key={'shared-' + board.roomId}
+              uri={roomUri(board)}
+              components={components}
+              onMount={(ed) => handleMount(ed, board)}
+            />
+          ) : (
+            <Tldraw
+              key={board.key}
+              persistenceKey={board.key}
+              shapeUtils={customShapeUtils}
+              components={components}
+              cameraOptions={{ wheelBehavior: 'zoom' }}
+              onMount={(ed) => handleMount(ed, board)}
+            />
+          )}
 
           {/* Хлебная крошка + переключатель досок */}
           <div
@@ -1391,6 +1903,37 @@ export default function App() {
                     ⬆ Импорт
                   </button>
                 </div>
+
+                {/* Real-time совместная работа */}
+                <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
+                {!board.shared ? (
+                  <div style={{ display: 'flex', gap: 6 }}>
+                    <button className="os-btn" onClick={makeShared} style={{ ...boardMenuBtn('#34D399'), flex: 1 }}>
+                      🌐 Сделать общей
+                    </button>
+                    <button className="os-btn" onClick={joinShared} style={{ ...boardMenuBtn('var(--text)'), flex: 1 }}>
+                      🔗 Подключиться
+                    </button>
+                  </div>
+                ) : (
+                  <>
+                    <div style={{ fontSize: 11, color: 'var(--muted)', padding: '2px 2px' }}>
+                      🌐 Общая доска · ID: <b style={{ color: 'var(--text)' }}>{board.roomId}</b>
+                    </div>
+                    <div style={{ display: 'flex', gap: 6 }}>
+                      <button className="os-btn" onClick={copyRoomId} style={{ ...boardMenuBtn('#34D399'), flex: 1 }}>
+                        📋 Копировать ID
+                      </button>
+                      <button className="os-btn" onClick={unshareBoard} style={{ ...boardMenuBtn('var(--muted)'), flex: 1 }}>
+                        ⏹ Отключить
+                      </button>
+                    </div>
+                  </>
+                )}
+                <button className="os-btn" onClick={askServer} style={{ ...boardMenuBtn('var(--muted)'), fontSize: 11 }}>
+                  ⚙ Сервер синхронизации{syncServer ? ' ✓' : ' (не задан)'}
+                </button>
+
                 {boards.length > 1 && (
                   <button className="os-btn" onClick={deleteBoard} style={boardMenuBtn('#F87171')}>
                     🗑 Удалить доску
@@ -1411,55 +1954,8 @@ export default function App() {
             )}
           </div>
 
-          {/* Верхние кнопки */}
-          <div
-            onPointerDown={(e) => e.stopPropagation()}
-            style={{ position: 'absolute', top: 12, right: 14, display: 'flex', gap: 8, zIndex: 10 }}
-          >
-            <button
-              className="os-btn os-topbtn"
-              onClick={() => setMobileOpen(true)}
-              title="Мобильный вид через Tailscale"
-              style={{
-                background: 'var(--panel)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                padding: '6px 12px',
-                font: `500 11.5px ${SANS}`,
-                color: 'var(--muted)'
-              }}
-            >
-              Туннель
-            </button>
-            <button
-              className="os-btn os-topbtn"
-              onClick={() => setRagOpen(true)}
-              style={{
-                background: 'var(--panel)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                padding: '6px 12px',
-                font: `500 11.5px ${SANS}`,
-                color: 'var(--text)'
-              }}
-            >
-              + RAG-проект
-            </button>
-            <button
-              className="os-btn os-topbtn"
-              onClick={() => setCmdkOpen(true)}
-              style={{
-                background: 'var(--panel)',
-                border: '1px solid var(--border)',
-                borderRadius: 8,
-                padding: '6px 12px',
-                font: `500 11.5px ${MONO}`,
-                color: 'var(--muted)'
-              }}
-            >
-              ⌘K
-            </button>
-          </div>
+          {/* Верхняя панель кнопок убрана — «Туннель», «RAG-проект» и палитра
+              доступны через Ctrl/⌘+K (см. командную палитру). */}
 
           <OSMinimap editor={editor} />
         </div>
@@ -1489,6 +1985,8 @@ export default function App() {
         onToCanvas={() => addNode('note', 'Заметка')}
       />
 
+      <VaultView open={vaultOpen} onClose={() => setVaultOpen(false)} onToast={showToast} />
+
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {editSlideId && editor && (
         <SlideEditor editor={editor} slideId={editSlideId} onClose={() => setEditSlideId(null)} />
@@ -1496,6 +1994,89 @@ export default function App() {
       {fsNodeId && editor && (
         <NodeFullscreenOverlay shapeId={fsNodeId} editor={editor} onClose={() => setFsNodeId(null)} />
       )}
+
+      {/* Всплывающая плашка категории нод */}
+      {flyout &&
+        (() => {
+          const g = NODE_GROUPS.find((x) => x.id === flyout.id)
+          if (!g) return null
+          const railW = sidebarOpen ? 214 : 56
+          const estH = 74 + g.kinds.length * 42 + 12
+          const top = Math.max(8, Math.min(flyout.top, window.innerHeight - estH - 12))
+          return (
+            <div
+              className="os-flyout"
+              onClick={(e) => e.stopPropagation()}
+              style={{
+                position: 'fixed',
+                left: railW + 6,
+                top,
+                zIndex: 60,
+                width: 266,
+                background: 'var(--panel)',
+                border: '1px solid var(--border)',
+                borderRadius: 14,
+                boxShadow: '0 18px 50px rgba(0,0,0,0.45)',
+                overflow: 'hidden'
+              }}
+            >
+              <div style={{ display: 'flex', gap: 11, padding: '13px 14px' }}>
+                <span
+                  style={{
+                    width: 34,
+                    height: 34,
+                    flexShrink: 0,
+                    borderRadius: 9,
+                    display: 'grid',
+                    placeItems: 'center',
+                    background: 'var(--panel2)',
+                    border: '1px solid var(--border)',
+                    color: 'var(--text)'
+                  }}
+                >
+                  <GroupIcon id={g.id} size={18} />
+                </span>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ font: `600 13.5px ${SANS}`, color: 'var(--text)' }}>{g.title}</div>
+                  <div style={{ font: `400 11px ${SANS}`, color: 'var(--muted)', lineHeight: 1.35, marginTop: 2 }}>
+                    {g.subtitle}
+                  </div>
+                </div>
+              </div>
+              <div style={{ height: 1, background: 'var(--border)' }} />
+              <div style={{ padding: 6 }}>
+                {g.kinds.map((kind) => (
+                  <div
+                    key={kind}
+                    className="os-flyout-item"
+                    draggable
+                    onDragStart={(e) => e.dataTransfer.setData('text/plain', kind)}
+                    onClick={() => {
+                      addNode(kind, chipTitle(kind))
+                      setFlyout(null)
+                    }}
+                    title={`Перетащите на холст: ${chipTitle(kind)}`}
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 12,
+                      padding: '9px 11px',
+                      borderRadius: 9,
+                      cursor: 'grab',
+                      color: 'var(--text)',
+                      transition: 'background .12s, transform .05s'
+                    }}
+                  >
+                    <span style={{ width: 22, display: 'grid', placeItems: 'center', color: chipColor(kind) ?? 'var(--muted)' }}>
+                      <NodeIcon kind={kind} size={18} />
+                    </span>
+                    <span style={{ font: `500 13px ${SANS}` }}>{chipTitle(kind)}</span>
+                  </div>
+                ))}
+              </div>
+            </div>
+          )
+        })()}
 
       <Toast text={toast} />
     </div>

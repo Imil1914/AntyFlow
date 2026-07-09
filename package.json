@@ -29,7 +29,9 @@
       "node_modules/pdfjs-dist/**",
       "node_modules/@napi-rs/**",
       "node_modules/@homebridge/node-pty-prebuilt-multiarch/**",
-      "node_modules/node-gyp-build/**"
+      "node_modules/node-gyp-build/**",
+      "out/main/orchestratorWorker.js",
+      "out/main/chunks/**"
     ],
     "win": {
       "target": [
@@ -47,11 +49,24 @@
     }
   },
   "dependencies": {
+    "@codemirror/autocomplete": "^6.20.3",
+    "@codemirror/commands": "^6.10.4",
+    "@codemirror/lang-markdown": "^6.5.0",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/language-data": "^6.5.2",
+    "@codemirror/search": "^6.7.1",
+    "@codemirror/state": "^6.7.1",
+    "@codemirror/view": "^6.43.6",
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "@huggingface/transformers": "^4.2.0",
+    "@lezer/common": "^1.5.2",
+    "@lezer/highlight": "^1.2.3",
+    "@lezer/markdown": "^1.7.0",
     "@modelcontextprotocol/sdk": "^1.29.0",
+    "@tldraw/sync": "^3.15.6",
     "@xterm/addon-fit": "^0.11.0",
     "@xterm/xterm": "^6.0.0",
+    "codemirror": "^6.0.2",
     "highlight.js": "^11.11.1",
     "html2canvas": "^1.4.1",
     "jspdf": "^4.2.1",
@@ -66,7 +81,8 @@
     "rehype-raw": "^7.0.0",
     "remark-gfm": "^4.0.1",
     "remark-math": "^6.0.0",
-    "tldraw": "^3.4.0"
+    "tldraw": "^3.4.0",
+    "xlsx": "^0.18.5"
   },
   "devDependencies": {
     "@types/node": "^22.10.0",
