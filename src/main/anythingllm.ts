@@ -8,12 +8,92 @@ import { app } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
 import { existsSync, mkdirSync, writeFileSync, readFileSync, cpSync, rmSync, appendFileSync, createWriteStream } from 'fs'
+import { anythingllmDir, nodeBin } from './sidecars'
 
 const REPO = 'https://github.com/Mintplex-Labs/anything-llm.git'
 // Пиновый стабильный релиз: master бывает нестабилен (ловили краш zod/v3 из MCP SDK).
 const TAG = 'v1.15.0'
 export const ANY_PORT = 3001
 const COLLECTOR_PORT = 8888
+
+// Загрузить PDF (base64) в AnythingLLM и вшить его в рабочее пространство (RAG).
+// Нужен API-ключ AnythingLLM (Settings → Developer API в его интерфейсе).
+export async function ingestDocument(
+  base64: string,
+  name: string,
+  apiKey: string,
+  workspaceName = 'Flow'
+): Promise<{ ok: boolean; error?: string }> {
+  if (!apiKey) return { ok: false, error: 'нет API-ключа AnythingLLM (⚙ Настройки)' }
+  const base = `http://localhost:${ANY_PORT}/api/v1`
+  const H: Record<string, string> = { Authorization: `Bearer ${apiKey}` }
+  try {
+    // 1) найти/создать рабочее пространство
+    const wsR = await fetch(`${base}/workspaces`, { headers: H })
+    if (!wsR.ok) {
+      return {
+        ok: false,
+        error:
+          wsR.status === 401 || wsR.status === 403
+            ? 'AnythingLLM: неверный API-ключ (сгенерируй в AnythingLLM → Settings → Developer API)'
+            : `AnythingLLM недоступен (${wsR.status})`
+      }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const wsD = (await wsR.json()) as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    let slug: string | undefined = (wsD.workspaces || []).find((w: any) => w.name === workspaceName)?.slug
+    if (!slug) {
+      const newR = await fetch(`${base}/workspace/new`, {
+        method: 'POST',
+        headers: { ...H, 'Content-Type': 'application/json' },
+        body: JSON.stringify({ name: workspaceName })
+      })
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const newD = (await newR.json().catch(() => ({}))) as any
+      slug = newD?.workspace?.slug
+    }
+    if (!slug) return { ok: false, error: 'не удалось создать workspace' }
+
+    // 2) дождаться collector (обработчик документов, :8888) — без него upload = 500
+    let collectorUp = await isCollectorHealthy()
+    for (let i = 0; i < 15 && !collectorUp; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      collectorUp = await isCollectorHealthy()
+    }
+
+    // 3) загрузить документ (multipart)
+    const form = new FormData()
+    const fname = name.toLowerCase().endsWith('.pdf') ? name : name.slice(0, 120) + '.pdf'
+    form.append('file', new Blob([Buffer.from(base64, 'base64')], { type: 'application/pdf' }), fname)
+    const upR = await fetch(`${base}/document/upload`, { method: 'POST', headers: H, body: form })
+    if (!upR.ok) {
+      let body = ''
+      try {
+        body = (await upR.text()).replace(/\s+/g, ' ').slice(0, 200)
+      } catch {
+        /* ignore */
+      }
+      const hint = !collectorUp ? ' — обработчик документов (collector :8888) не запущен' : ''
+      return { ok: false, error: `AnythingLLM upload ${upR.status}${hint}${body ? ' — ' + body : ''}` }
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const upD = (await upR.json()) as any
+    const loc = upD?.documents?.[0]?.location
+    if (!loc) return { ok: false, error: 'AnythingLLM: загрузка без location' }
+
+    // 4) вшить документ в рабочее пространство (эмбеддинги)
+    const emR = await fetch(`${base}/workspace/${slug}/update-embeddings`, {
+      method: 'POST',
+      headers: { ...H, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ adds: [loc] })
+    })
+    if (!emR.ok) return { ok: false, error: `AnythingLLM embed ${emR.status}` }
+    return { ok: true }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
 
 export type AnyPhase =
   | 'idle'
@@ -42,11 +122,28 @@ export function onAnyProgress(cb: (p: Progress) => void): void {
 function baseDir(): string {
   return join(app.getPath('userData'), 'anythingllm')
 }
-function repoDir(): string {
-  return join(baseDir(), 'repo')
+// Prebuilt-режим: артефакт вложен в установщик (resources/anythingllm). Тогда сам
+// репозиторий read-only в resources, а данные (storage + БД) живут в userData.
+function bundledDir(): string | null {
+  return anythingllmDir()
 }
+function usingBundled(): boolean {
+  return !!bundledDir()
+}
+// Node для запуска: приватный (вложенный) в prebuilt-режиме, системный — в dev/clone.
+function anyNode(): string {
+  return (usingBundled() && nodeBin()) || 'node'
+}
+function repoDir(): string {
+  return bundledDir() || join(baseDir(), 'repo')
+}
+// В prebuilt-режиме storage обязан быть writable → userData; в dev — внутри репозитория.
 function storageDir(): string {
-  return join(repoDir(), 'server', 'storage')
+  return usingBundled() ? join(baseDir(), 'storage') : join(repoDir(), 'server', 'storage')
+}
+// Путь к sqlite-БД для prisma (схема артефакта использует env("DATABASE_URL")).
+function dbUrl(): string {
+  return 'file:' + join(storageDir(), 'anythingllm.db').replace(/\\/g, '/')
 }
 function logFile(): string {
   return join(baseDir(), 'install.log')
@@ -71,12 +168,18 @@ function log(line: string): void {
   }
 }
 
-// Признак «установлено»: репозиторий склонирован, зависимости сервера стоят,
-// фронт собран в server/public.
+// Entry фронта: AnythingLLM переименовывает index.html → _index.html (postbuild).
+function frontendBuilt(): boolean {
+  const pub = join(repoDir(), 'server', 'public')
+  return existsSync(join(pub, '_index.html')) || existsSync(join(pub, 'index.html'))
+}
+// Признак «установлено»: в prebuilt-режиме артефакт всегда готов; иначе — репозиторий
+// склонирован, зависимости сервера стоят, фронт собран в server/public.
 function isInstalled(): boolean {
+  if (usingBundled()) return true
   return (
     existsSync(join(repoDir(), 'server', 'node_modules')) &&
-    existsSync(join(repoDir(), 'server', 'public', 'index.html')) &&
+    frontendBuilt() &&
     existsSync(join(repoDir(), 'collector', 'node_modules'))
   )
 }
@@ -239,22 +342,69 @@ async function install(): Promise<void> {
   }
   cpSync(dist, pub, { recursive: true })
 
-  // 5. Prisma: генерация клиента и миграции БД
+  // 5. Prisma: генерация клиента и миграции БД.
+  // ВАЖНО: prisma generate перезаписывает query_engine-*.node. Если сервер уже
+  // запущен (напр. осиротевший процесс от прошлой сессии), файл залочен → EPERM
+  // «operation not permitted, unlink». Поэтому: если клиент уже сгенерирован —
+  // пропускаем generate (он не нужен повторно). Так повторный install не падает.
   setPhase('migrating', 'Готовлю базу данных…')
   const serverDir = join(repoDir(), 'server')
-  await runStep('npx', ['prisma', 'generate', '--schema=./prisma/schema.prisma'], serverDir)
+  const prismaEngine = join(serverDir, 'node_modules', '.prisma', 'client', 'query_engine-windows.dll.node')
+  const prismaIndex = join(serverDir, 'node_modules', '.prisma', 'client', 'index.js')
+  if (!existsSync(prismaEngine) && !existsSync(prismaIndex)) {
+    await runStep('npx', ['prisma', 'generate', '--schema=./prisma/schema.prisma'], serverDir)
+  } else {
+    appendFileSync(logFile(), '\n=== [migrating] prisma client уже сгенерирован — пропускаю generate ===\n')
+  }
   await runStep('npx', ['prisma', 'migrate', 'deploy', '--schema=./prisma/schema.prisma'], serverDir)
 }
 
+// Prebuilt: создать БД в userData при первом запуске (prisma migrate deploy приватным Node).
+// В dev-режиме БД создаётся в install() — тут ничего не делаем.
+async function ensureDb(): Promise<void> {
+  if (!usingBundled()) return
+  mkdirSync(storageDir(), { recursive: true })
+  if (existsSync(join(storageDir(), 'anythingllm.db'))) return
+  setPhase('migrating', 'Готовлю базу данных…')
+  const serverDir = join(repoDir(), 'server')
+  const prismaCli = join(serverDir, 'node_modules', 'prisma', 'build', 'index.js')
+  await new Promise<void>((resolve, reject) => {
+    const p = spawn(anyNode(), [prismaCli, 'migrate', 'deploy', '--schema=./prisma/schema.prisma'], {
+      cwd: serverDir,
+      shell: false,
+      windowsHide: true,
+      env: { ...process.env, DATABASE_URL: dbUrl(), STORAGE_DIR: storageDir() }
+    })
+    const stream = createWriteStream(logFile(), { flags: 'a' })
+    p.stdout?.pipe(stream)
+    p.stderr?.pipe(stream)
+    p.on('error', reject)
+    p.on('exit', (code) => (code === 0 ? resolve() : reject(new Error('prisma migrate завершился с кодом ' + code))))
+  })
+}
+
+// Общее окружение для server/collector. В prebuilt добавляем DATABASE_URL (БД в userData).
+function svcEnv(port: number): Record<string, string> {
+  const env: Record<string, string> = {
+    ...process.env,
+    NODE_ENV: 'production',
+    STORAGE_DIR: storageDir(),
+    SERVER_PORT: String(port)
+  }
+  if (usingBundled()) env.DATABASE_URL = dbUrl()
+  return env
+}
+
 // Запуск server и collector — по отдельности, чтобы уметь поднимать любой из них.
+// В prebuilt зовём приватный Node напрямую (shell:false), в dev — системный через PATH.
 function startServer(): void {
   if (serverProc) return
   const outStream = createWriteStream(join(baseDir(), 'runtime.log'), { flags: 'a' })
-  serverProc = spawn('node', ['index.js'], {
+  serverProc = spawn(anyNode(), ['index.js'], {
     cwd: join(repoDir(), 'server'),
-    shell: true,
+    shell: !usingBundled(),
     windowsHide: true,
-    env: { ...process.env, NODE_ENV: 'production', STORAGE_DIR: storageDir(), SERVER_PORT: String(ANY_PORT) }
+    env: svcEnv(ANY_PORT)
   })
   serverProc.stdout?.pipe(outStream)
   serverProc.stderr?.pipe(outStream)
@@ -267,13 +417,13 @@ function startServer(): void {
 function startCollector(): void {
   if (collectorProc) return
   const outStream = createWriteStream(join(baseDir(), 'runtime.log'), { flags: 'a' })
-  collectorProc = spawn('node', ['index.js'], {
+  collectorProc = spawn(anyNode(), ['index.js'], {
     cwd: join(repoDir(), 'collector'),
-    shell: true,
+    shell: !usingBundled(),
     windowsHide: true,
     // STORAGE_DIR обязателен и collector'у: в production он резолвит
     // path.resolve(STORAGE_DIR, 'documents'); без него краш при старте.
-    env: { ...process.env, NODE_ENV: 'production', STORAGE_DIR: storageDir(), SERVER_PORT: String(COLLECTOR_PORT) }
+    env: svcEnv(COLLECTOR_PORT)
   })
   collectorProc.stdout?.pipe(outStream)
   collectorProc.stderr?.pipe(outStream)
@@ -299,6 +449,7 @@ export async function ensureAnything(): Promise<{ ok: boolean; port?: number; er
     if (!isInstalled()) {
       await install()
     }
+    await ensureDb() // prebuilt: создать БД в userData при первом запуске
     setPhase('starting', serverUp ? 'Запускаю обработчик документов…' : 'Запускаю AnythingLLM…')
     if (!serverUp) startServer()
     if (!collectorUp) startCollector()
@@ -323,7 +474,14 @@ export async function ensureAnything(): Promise<{ ok: boolean; port?: number; er
 export function stopAnything(): void {
   for (const p of [serverProc, collectorProc]) {
     try {
-      p?.kill()
+      // spawn(...,{shell:true}) на Windows оставляет дочерний node-процесс — .kill()
+      // гасит только оболочку, а node держит query_engine DLL. Убиваем ВСЁ дерево,
+      // иначе осиротевший сервер блокирует следующий prisma generate (EPERM).
+      if (p?.pid && process.platform === 'win32') {
+        spawn('taskkill', ['/pid', String(p.pid), '/T', '/F'], { windowsHide: true, shell: false })
+      } else {
+        p?.kill()
+      }
     } catch {
       /* ignore */
     }

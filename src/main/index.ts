@@ -2,18 +2,25 @@ import { app, BrowserWindow, ipcMain, shell, dialog, Menu, type WebContents } fr
 import { join } from 'path'
 import { spawn } from 'child_process'
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch'
-import { ensureAnything, anyState, stopAnything, onAnyProgress } from './anythingllm'
+import { ensureAnything, anyState, stopAnything, onAnyProgress, ingestDocument } from './anythingllm'
 import { ensureOpenscience, opensciState, stopOpenscience, onOpensciProgress } from './openscience'
 import { registerNotebookIpc, stopAllKernels } from './notebook'
 import { registerPdfIpc, searchPdf } from './pdf'
 import { registerOrchestratorIpc, stopAllOrchestrations } from './orchestrator'
 import { registerVaultIpc, stopVaultWatcher } from './vault'
 import { registerCanvasSyncIpc } from './canvas-sync'
+import { registerPapersIpc } from './papers'
+import { opencodeBin } from './sidecars'
 
 registerNotebookIpc()
 registerPdfIpc()
 registerVaultIpc()
 registerCanvasSyncIpc()
+// Ключи научных источников берём из settings.json в момент запроса.
+registerPapersIpc(() => {
+  const s = getSettings()
+  return { elsevierKey: s.elsevierKey, elsevierInsttoken: s.elsevierInsttoken, unpaywallEmail: s.unpaywallEmail }
+})
 // callModel и getSettings — function declarations (hoisted), поэтому доступны здесь.
 registerOrchestratorIpc({ callModel, getDefaultModel: () => getSettings().defaultModel })
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs'
@@ -82,13 +89,22 @@ type Settings = {
   comfyCmd: string // команда запуска ComfyUI (напр. путь к run_nvidia_gpu.bat)
   comfyCwd: string // рабочая папка ComfyUI (необязательно)
   lmsCmd: string // команда запуска LM Studio (напр. "lms server start")
+  // Научные источники
+  elsevierKey: string // API-ключ Elsevier (dev.elsevier.com)
+  elsevierInsttoken: string // institutional token (для полного текста вне сети института)
+  unpaywallEmail: string // email для Unpaywall (легальный бесплатный PDF по DOI)
+  anythingllmKey: string // API-ключ AnythingLLM (для загрузки статей в базу знаний)
 }
 const DEFAULT_SETTINGS: Settings = {
   defaultModel: '',
   autoStart: false,
   comfyCmd: '',
   comfyCwd: '',
-  lmsCmd: ''
+  lmsCmd: '',
+  elsevierKey: '',
+  elsevierInsttoken: '',
+  unpaywallEmail: '',
+  anythingllmKey: ''
 }
 function settingsPath() {
   return join(app.getPath('userData'), 'settings.json')
@@ -185,8 +201,10 @@ async function ensureOpencode(cwd: string): Promise<{ ok: boolean; port?: number
   }
   const port = 4096
   try {
-    const p = spawn('opencode', ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
-      shell: true,
+    // Вложенный бинарник (resources/bin/opencode.exe) в приоритете; иначе — из PATH.
+    const bin = opencodeBin()
+    const p = spawn(bin || 'opencode', ['serve', '--port', String(port), '--hostname', '127.0.0.1'], {
+      shell: !bin, // из PATH это .ps1/.cmd-шим — нужен shell; вложенный .exe зовём напрямую
       cwd: dir,
       stdio: 'ignore',
       windowsHide: true
@@ -484,6 +502,28 @@ ipcMain.handle('anythingllm:state', async () => anyState())
 ipcMain.handle('anythingllm:stop', async () => {
   stopAnything()
   return { ok: true as const }
+})
+ipcMain.handle('anythingllm:ingest', async (_e, args: { base64: string; name: string }) => {
+  const key = getSettings().anythingllmKey
+  if (!key) return { ok: false, error: 'Не указан API-ключ AnythingLLM (⚙ Настройки → Научные источники)' }
+  // Авто-запуск сервера, если он ещё не поднят.
+  let st = await anyState()
+  if (!st.running) {
+    ensureAnything() // старт/установка в фоне (промис целиком не ждём)
+    for (let i = 0; i < 45 && !st.running; i++) {
+      await new Promise((r) => setTimeout(r, 2000))
+      st = await anyState()
+    }
+    if (!st.running) {
+      return {
+        ok: false,
+        error: st.installed
+          ? 'AnythingLLM ещё запускается — повтори через минуту'
+          : 'AnythingLLM устанавливается (первый запуск долгий, несколько минут) — подожди и повтори'
+      }
+    }
+  }
+  return ingestDocument(args.base64, args.name, key)
 })
 
 // --- OpenScience (@synsci/openscience — headless-сервер + webview) ---

@@ -1,6 +1,6 @@
 // React-обёртка над CodeMirror 6 с live-preview Markdown, автодополнением [[ссылок]]
 // и переходом по ним. Редактор — источник истины после загрузки; наверх отдаём onChange.
-import { useEffect, useRef } from 'react'
+import { forwardRef, useEffect, useImperativeHandle, useRef } from 'react'
 import { EditorView, keymap, drawSelection, highlightActiveLine } from '@codemirror/view'
 import { EditorState, Compartment } from '@codemirror/state'
 import { history, historyKeymap, defaultKeymap, indentWithTab } from '@codemirror/commands'
@@ -12,19 +12,25 @@ import { livePreview, vaultTheme, mdSyntaxHighlight } from './livePreview'
 
 export type NoteRef = { name: string; path: string }
 
-export function MarkdownEditor({
-  docId,
-  value,
-  onChange,
-  onOpenLink,
-  notes
-}: {
-  docId: string // относительный путь заметки (ключ смены документа)
-  value: string // содержимое (используется как начальное для данного docId)
-  onChange: (doc: string) => void
-  onOpenLink: (target: string) => void
-  notes: NoteRef[]
-}): JSX.Element {
+// Императивный API для панели форматирования (B, I, [[ ]], списки, таблицы…)
+export type MarkdownEditorHandle = {
+  insert: (before: string, after: string, placeholder: string) => void
+  replaceAll: (text: string) => void
+  focus: () => void
+}
+
+export const MarkdownEditor = forwardRef<
+  MarkdownEditorHandle,
+  {
+    docId: string // относительный путь заметки (ключ смены документа)
+    value: string // содержимое (используется как начальное для данного docId)
+    onChange: (doc: string) => void
+    onOpenLink: (target: string) => void
+    onOpenBoard: (name: string) => void // клик по [[[доске]]]
+    boards: string[] // имена досок холста (для exists-проверки)
+    notes: NoteRef[]
+  }
+>(function MarkdownEditor({ docId, value, onChange, onOpenLink, onOpenBoard, boards, notes }, ref): JSX.Element {
   const hostRef = useRef<HTMLDivElement>(null)
   const viewRef = useRef<EditorView | null>(null)
   const loadedId = useRef<string | null>(null)
@@ -32,9 +38,35 @@ export function MarkdownEditor({
   const notesRef = useRef<NoteRef[]>(notes)
   const openRef = useRef(onOpenLink)
   const changeRef = useRef(onChange)
+  const boardsRef = useRef<string[]>(boards)
+  const openBoardRef = useRef(onOpenBoard)
   notesRef.current = notes
   openRef.current = onOpenLink
   changeRef.current = onChange
+  boardsRef.current = boards
+  openBoardRef.current = onOpenBoard
+
+  // Вставка вокруг выделения (панель форматирования) — работает прямо в CodeMirror.
+  useImperativeHandle(ref, () => ({
+    insert(before: string, after: string, placeholder: string) {
+      const view = viewRef.current
+      if (!view) return
+      const { from, to } = view.state.selection.main
+      const sel = view.state.sliceDoc(from, to) || placeholder
+      const insert = before + sel + after
+      const caret = from + before.length + sel.length + after.length
+      view.dispatch({ changes: { from, to, insert }, selection: { anchor: caret } })
+      view.focus()
+    },
+    replaceAll(text: string) {
+      const view = viewRef.current
+      if (!view) return
+      view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: text } })
+    },
+    focus() {
+      viewRef.current?.focus()
+    }
+  }))
 
   useEffect(() => {
     if (!hostRef.current || viewRef.current) return
@@ -64,7 +96,12 @@ export function MarkdownEditor({
         closeBrackets(),
         markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
         mdSyntaxHighlight,
-        livePreview({ onOpenLink: (t) => openRef.current(t), linkExists }),
+        livePreview({
+          onOpenLink: (t) => openRef.current(t),
+          linkExists,
+          onOpenBoard: (n) => openBoardRef.current(n),
+          boardExists: (n) => boardsRef.current.some((b) => b.toLowerCase() === n.toLowerCase())
+        }),
         autocompletion({ override: [wikiComplete], activateOnTyping: true }),
         vaultTheme,
         keymap.of([...closeBracketsKeymap, ...defaultKeymap, ...historyKeymap, ...searchKeymap, indentWithTab]),
@@ -95,4 +132,4 @@ export function MarkdownEditor({
   }, [docId, value])
 
   return <div ref={hostRef} className="vault-cm" style={{ height: '100%', overflow: 'hidden' }} />
-}
+})

@@ -969,10 +969,306 @@ function MicButton({ onText, round }: { onText: (t: string) => void; round?: boo
   )
 }
 
+// ========================================================================
+// «РУКИ» ИИ НА ХОЛСТЕ: модель может создавать новые ноды и заполнять
+// подключённые (ноутбук, канбан, бэклог, заметки…) через блок flow-actions.
+// ========================================================================
+// Ноды, которые ИИ умеет заполнять/создавать.
+const BUILDABLE = new Set(['notebook', 'kanban', 'board', 'note', 'doc', 'list', 'sheet', 'ai', 'code', 'diagram'])
+const BUILD_SIZES: Record<string, [number, number]> = {
+  note: [280, 240], doc: [280, 280], ai: [320, 340], code: [320, 240], list: [320, 340],
+  sheet: [620, 380], diagram: [320, 380], kanban: [1000, 460], board: [1120, 720], notebook: [640, 600]
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function connectedBuildable(editor: Editor, sourceId: string): Array<{ id: string; kind: string; title: string }> {
+  const out: Array<{ id: string; kind: string; title: string }> = []
+  const seen = new Set<string>()
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const touching = (editor as any).getBindingsToShape(sourceId, 'arrow') as Array<{ fromId: string }>
+    for (const b of touching) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const ends = (editor as any).getBindingsFromShape(b.fromId, 'arrow') as Array<{ toId: string }>
+      for (const ab of ends) {
+        if (ab.toId === sourceId || seen.has(ab.toId)) continue
+        seen.add(ab.toId)
+        const s = editor.getShape<FlowNodeShape>(ab.toId as never)
+        if (s?.type === 'flow-node' && BUILDABLE.has(s.props.kind)) out.push({ id: String(s.id), kind: s.props.kind, title: s.props.title })
+      }
+    }
+  } catch {
+    /* API отличается */
+  }
+  return out
+}
+
+// Инструкция для модели: как выдавать действия по холсту (+ список подключённых нод).
+function canvasToolsPrompt(editor: Editor, sourceId: string): string {
+  const conn = connectedBuildable(editor, sourceId)
+  const list = conn.length
+    ? conn.map((n) => `  • ${KIND_NAME[n.kind] || n.kind}${n.title ? ` «${n.title}»` : ''} [target:"${n.kind}"]`).join('\n')
+    : '  (подключённых нод нет — используй только create)'
+  return (
+    '\n\n== ДЕЙСТВИЯ НА ХОЛСТЕ ==\n' +
+    'Ты можешь СОЗДАВАТЬ новые ноды и ЗАПОЛНЯТЬ подключённые. Если пользователь просит ' +
+    'сделать/создать/заполнить ноутбук, канбан, бэклог, заметку, список и т.п. — В КОНЦЕ ответа ' +
+    'добавь РОВНО ОДИН блок (валидный JSON):\n' +
+    '```flow-actions\n{"actions":[ ... ]}\n```\n' +
+    'Формы действий:\n' +
+    '- Ноутбук: {"op":"create","kind":"notebook","title":"...","cells":[{"type":"markdown","source":"# Тема"},{"type":"code","source":"import numpy as np"}]}\n' +
+    '- Канбан: {"op":"create","kind":"kanban","title":"...","columns":[{"name":"Нужно сделать","cards":["задача 1","задача 2"]}]}\n' +
+    '- Бэклог: {"op":"create","kind":"board","title":"...","boards":[{"name":"Доска","columns":[{"name":"Идеи","cards":["..."]}]}]}\n' +
+    '- Заметка: {"op":"create","kind":"note","title":"...","body":"markdown-текст"}\n' +
+    '- Заполнить ПОДКЛЮЧЁННУЮ ноду: {"op":"fill","target":"notebook"|"kanban"|"board"|"note", ...те же поля...}\n' +
+    '- Найти и скачать НАУЧНЫЕ СТАТЬИ на холст (PDF-ноды), опц. залить в базу знаний AnythingLLM: ' +
+    '{"op":"papers","query":"тема на английском","count":5,"toKb":true}\n' +
+    'Подключённые ноды (их заполняй через fill с нужным target):\n' +
+    list +
+    '\nПравила: обычный текстовый ответ пиши как всегда ДО блока. Блок flow-actions — строго в самом конце, ' +
+    'валидный JSON, без комментариев. Код в ячейках — рабочий Python. ' +
+    'ГЛАВНОЕ: если нужная нода УЖЕ подключена (в списке выше) — ЗАПОЛНЯЙ её через op:"fill" с её target, ' +
+    'НЕ создавай новую того же типа. create — только для того, чего среди подключённых нет. ' +
+    'НЕ добавляй действия, если пользователь ничего строить не просил.'
+  )
+}
+
+// Извлечь блок flow-actions из ответа; вернуть действия и текст без блока.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function parseFlowActions(text: string): { actions: any[]; clean: string } {
+  const m = text.match(/```flow-actions\s*([\s\S]*?)```/)
+  if (!m) return { actions: [], clean: text }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  let actions: any[] = []
+  try {
+    const j = JSON.parse(m[1].trim())
+    actions = Array.isArray(j?.actions) ? j.actions : Array.isArray(j) ? j : []
+  } catch {
+    /* битый JSON — игнорируем действия */
+  }
+  return { actions, clean: text.replace(m[0], '').trim() }
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function kanbanExtraFrom(columns: any[]): string {
+  const cols = (Array.isArray(columns) ? columns : []).map((c, i) => ({
+    id: kbId(),
+    name: String(c?.name ?? 'Колонка'),
+    color: GROUP_HUES[i % GROUP_HUES.length],
+    cards: (Array.isArray(c?.cards) ? c.cards : []).map((t: unknown) => ({ id: kbId(), text: String(t) }))
+  }))
+  return JSON.stringify({ kanban: { columns: cols.length ? cols : defaultKanban().columns } })
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function boardExtraFrom(boards: any[]): string {
+  const bs = (Array.isArray(boards) ? boards : []).map((b, bi) => ({
+    id: kbId(),
+    name: String(b?.name ?? 'Доска'),
+    color: BOARD_HUES[bi % BOARD_HUES.length],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    columns: (Array.isArray(b?.columns) ? b.columns : []).map((c: any) => ({
+      id: kbId(),
+      name: String(c?.name ?? 'Колонка'),
+      cards: (Array.isArray(c?.cards) ? c.cards : []).map((t: unknown) => ({ id: kbId(), text: String(t) }))
+    }))
+  }))
+  return JSON.stringify({ board: { boards: bs.length ? bs : defaultBoard().boards } })
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function notebookHistoryFrom(cells: any[]): string {
+  const cs = (Array.isArray(cells) ? cells : []).map((c) => ({
+    id: nbId(),
+    type: c?.type === 'markdown' ? 'markdown' : 'code',
+    source: String(c?.source ?? ''),
+    outputs: [],
+    count: null
+  }))
+  return JSON.stringify({ cells: cs.length ? cs : [{ id: nbId(), type: 'code', source: '', outputs: [], count: null }] })
+}
+
+// Создать новую ноду по действию create и присоединить стрелкой к источнику.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function createBuiltNode(editor: Editor, sourceId: string, a: any, idx: number): void {
+  const kind = String(a.kind || 'note')
+  const [w, h] = BUILD_SIZES[kind] || [300, 240]
+  const b = editor.getShapePageBounds(sourceId as never)
+  const id = createShapeId()
+  let extra = '{}'
+  let bodyTxt = ''
+  let history = '[]'
+  if (kind === 'kanban') extra = kanbanExtraFrom(a.columns || [])
+  else if (kind === 'board') extra = boardExtraFrom(a.boards || [])
+  else if (kind === 'notebook') history = notebookHistoryFrom(a.cells || [])
+  else bodyTxt = String(a.body ?? a.prompt ?? '')
+  const x = b ? b.maxX + 90 : 0
+  const y = b ? b.y + idx * (h + 40) : idx * 260
+  editor.createShape<FlowNodeShape>({
+    id,
+    type: 'flow-node',
+    x,
+    y,
+    props: { kind, title: String(a.title || KIND_NAME[kind] || kind), body: bodyTxt, history, extra, w, h, sourceId }
+  })
+  connectArrow(editor, sourceId, id)
+}
+
+// Заполнить ПОДКЛЮЧЁННУЮ ноду нужного типа (append данных).
+// Ядро: заполнить КОНКРЕТНУЮ ноду по её id (append данных). Используется и flow-action
+// fill, и прицельным авто-построением оркестратора (по каждой подключённой ноде).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyFillToNode(editor: Editor, nodeId: string, kind: string, a: any): boolean {
+  const shape = editor.getShape<FlowNodeShape>(nodeId as never)
+  if (!shape) return false
+  const ex = parseExtra(shape.props.extra)
+  if (kind === 'kanban') {
+    const cur = readKanban(shape.props.extra)
+    for (const c of Array.isArray(a.columns) ? a.columns : []) {
+      let col = cur.columns.find((x) => x.name.toLowerCase() === String(c?.name ?? '').toLowerCase())
+      if (!col) {
+        col = { id: kbId(), name: String(c?.name ?? 'Колонка'), color: GROUP_HUES[cur.columns.length % GROUP_HUES.length], cards: [] }
+        cur.columns.push(col)
+      }
+      for (const t of Array.isArray(c?.cards) ? c.cards : []) col.cards.push({ id: kbId(), text: String(t) })
+    }
+    editor.updateShape<FlowNodeShape>({ id: nodeId as never, type: 'flow-node', props: { extra: JSON.stringify({ ...ex, kanban: cur }) } })
+    return true
+  }
+  if (kind === 'board') {
+    const cur = readBoard(shape.props.extra)
+    for (const b of Array.isArray(a.boards) ? a.boards : []) {
+      let brd = cur.boards.find((x) => x.name.toLowerCase() === String(b?.name ?? '').toLowerCase())
+      if (!brd) {
+        brd = { id: kbId(), name: String(b?.name ?? 'Доска'), color: BOARD_HUES[cur.boards.length % BOARD_HUES.length], columns: [] }
+        cur.boards.push(brd)
+      }
+      for (const c of Array.isArray(b?.columns) ? b.columns : []) {
+        let col = brd.columns.find((x) => x.name.toLowerCase() === String(c?.name ?? '').toLowerCase())
+        if (!col) {
+          col = { id: kbId(), name: String(c?.name ?? 'Колонка'), cards: [] }
+          brd.columns.push(col)
+        }
+        for (const t of Array.isArray(c?.cards) ? c.cards : []) col.cards.push({ id: kbId(), text: String(t) })
+      }
+    }
+    editor.updateShape<FlowNodeShape>({ id: nodeId as never, type: 'flow-node', props: { extra: JSON.stringify({ ...ex, board: cur }) } })
+    return true
+  }
+  if (kind === 'notebook') {
+    let cur: { cells: unknown[] } = { cells: [] }
+    try {
+      const j = JSON.parse(shape.props.history || '{}')
+      if (Array.isArray(j.cells)) cur = j
+    } catch {
+      /* пустой */
+    }
+    for (const c of Array.isArray(a.cells) ? a.cells : []) {
+      cur.cells.push({ id: nbId(), type: c?.type === 'markdown' ? 'markdown' : 'code', source: String(c?.source ?? ''), outputs: [], count: null })
+    }
+    editor.updateShape<FlowNodeShape>({ id: nodeId as never, type: 'flow-node', props: { history: JSON.stringify(cur) } })
+    return true
+  }
+  if (kind === 'note' || kind === 'doc') {
+    const prev = shape.props.body || ''
+    const add = String(a.body ?? '')
+    editor.updateShape<FlowNodeShape>({ id: nodeId as never, type: 'flow-node', props: { body: prev ? prev + '\n\n' + add : add } })
+    return true
+  }
+  return false
+}
+
+// Заполнить ПОДКЛЮЧЁННУЮ ноду по действию fill (target = тип ноды).
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function fillConnectedNode(editor: Editor, sourceId: string, a: any): boolean {
+  const target = String(a.target || '')
+  const node = connectedBuildable(editor, sourceId).find((n) => n.kind === target)
+  if (!node) return false
+  return applyFillToNode(editor, node.id, target, a)
+}
+
+// Действие «papers»: найти статьи по запросу, скачать топ-N в PDF-ноды на холст,
+// опционально залить в базу знаний AnythingLLM. Возвращает {скачано, в базу}.
+async function downloadPapersAction(
+  editor: Editor,
+  sourceId: string,
+  query: string,
+  count: number,
+  toKb: boolean
+): Promise<{ got: number; kb: number }> {
+  const q = String(query || '').trim()
+  if (!q) return { got: 0, kb: 0 }
+  const n = Math.max(1, Math.min(15, count || 5))
+  const pr = await window.flow.papersSearch({ query: q, sources: ['openalex'], limit: n })
+  if (!pr.ok) return { got: 0, kb: 0 }
+  let got = 0
+  let kb = 0
+  let y = 0
+  const b = editor.getShapePageBounds(sourceId as never)
+  for (const p of pr.results.slice(0, n)) {
+    try {
+      const res = await window.flow.papersPdf({ doi: p.doi, pdfUrl: p.pdfUrl, source: p.source })
+      if (!res.ok) continue
+      const pdfId = 'pdf_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+      const imp = await window.flow.pdfImport({ base64: res.base64, id: pdfId })
+      if (imp.ok) {
+        const nid = createShapeId()
+        editor.createShape<FlowNodeShape>({
+          id: nid,
+          type: 'flow-node',
+          x: b ? b.maxX + 90 : 0,
+          y: (b ? b.y : 0) + y,
+          props: { kind: 'pdf', title: p.title.slice(0, 90), body: '', history: '[]', extra: JSON.stringify({ pdfId, name: p.title }), w: 480, h: 620, sourceId: String(sourceId) }
+        })
+        connectArrow(editor, sourceId, nid)
+        y += 660
+        got++
+      }
+      if (toKb) {
+        const ing = await window.flow.anythingIngest({ base64: res.base64, name: p.title })
+        if (ing.ok) kb++
+      }
+    } catch {
+      /* пропускаем недоступные */
+    }
+  }
+  return { got, kb }
+}
+
+// Применить все действия модели. Возвращает краткий отчёт (или '').
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+async function applyFlowActions(editor: Editor, sourceId: string, actions: any[]): Promise<string> {
+  let created = 0
+  let filled = 0
+  let papersGot = 0
+  let papersKb = 0
+  let ci = 0
+  for (const a of actions) {
+    try {
+      if (a?.op === 'create') {
+        createBuiltNode(editor, sourceId, a, ci++)
+        created++
+      } else if (a?.op === 'fill') {
+        if (fillConnectedNode(editor, sourceId, a)) filled++
+      } else if (a?.op === 'papers') {
+        const r = await downloadPapersAction(editor, sourceId, a.query, a.count, !!a.toKb)
+        papersGot += r.got
+        papersKb += r.kb
+      }
+    } catch {
+      /* одно битое действие не должно ронять остальные */
+    }
+  }
+  const parts: string[] = []
+  if (created) parts.push(`создано нод: ${created}`)
+  if (filled) parts.push(`заполнено нод: ${filled}`)
+  if (papersGot) parts.push(`статей скачано: ${papersGot}`)
+  if (papersKb) parts.push(`в AnythingLLM: ${papersKb}`)
+  return parts.join(' · ')
+}
+
 function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
   const update = useUpdate(editor, shape)
   const { body, model, contextTokens } = shape.props
-  let ex: { webAuto?: boolean; tools?: boolean } = {}
+  let ex: { webAuto?: boolean; tools?: boolean; build?: boolean; sci?: boolean } = {}
   try {
     ex = JSON.parse(shape.props.extra || '{}')
   } catch {
@@ -980,6 +1276,8 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
   }
   const webAuto = !!ex.webAuto
   const toolsOn = !!ex.tools
+  const buildOn = !!ex.build
+  const sciOn = !!(ex as { sci?: boolean }).sci
   const setEx = (patch: Record<string, unknown>) =>
     update({ extra: JSON.stringify({ ...ex, ...patch }) })
   const [loading, setLoading] = useState(false)
@@ -1097,6 +1395,33 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
         }
       }
 
+      // Авто-поиск научных статей: модель сама решает, нужны ли статьи
+      let sciContext = ''
+      if (sciOn) {
+        flash('🔬 Проверяю, нужны ли статьи…')
+        const decSys =
+          'Реши, помогут ли научные статьи (журналы, arXiv, PubMed) точно ответить на запрос. ' +
+          'Ответь СТРОГО одним JSON без пояснений: {"search": true|false, "query": "поисковый запрос на английском по теме"}.'
+        const dec = await window.flow.aiChat({ model, messages: [{ role: 'system', content: decSys }, { role: 'user', content: body }] })
+        if (dec.ok) {
+          const parsed = parseDecision(dec.content)
+          if (parsed?.search && parsed.query) {
+            flash('🔬 Ищу научные статьи…')
+            const pr = await window.flow.papersSearch({ query: parsed.query, sources: ['openalex'], limit: 8 })
+            if (pr.ok && pr.results.length) {
+              sciContext = pr.results
+                .map(
+                  (p, i) =>
+                    `[S${i + 1}] ${p.title} (${p.authors.slice(0, 3).join(', ')}${p.year ? ', ' + p.year : ''})` +
+                    (p.doi ? `\nDOI: ${p.doi}` : '') +
+                    (p.abstract ? `\n${p.abstract.slice(0, 700)}` : '')
+                )
+                .join('\n\n')
+            }
+          }
+        }
+      }
+
       // Собираем сообщения для финального ответа (поиск вставляем только на этот ход)
       const finalMessages: ChatMessage[] = [...history]
       if (searchContext) {
@@ -1106,6 +1431,14 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
             'Актуальные результаты веб-поиска для ответа:\n' +
             searchContext +
             '\nОпирайся на них и ссылайся на источники как [1], [2].'
+        })
+      }
+      if (sciContext) {
+        finalMessages.push({
+          role: 'system',
+          content:
+            'Научные статьи по теме (используй как источники, ссылайся как [S1], [S2] с DOI):\n' +
+            sciContext
         })
       }
       // Контекст от связанных чатов/нод: стрелки, ведущие В этот чат
@@ -1134,6 +1467,11 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
             fileParts.map((a) => `=== ${a.name} ===\n${a.text}`).join('\n\n')
         })
       }
+      // Режим «строить на холсте»: даём модели инструкцию про действия + список
+      // подключённых нод, которые можно заполнять.
+      if (buildOn) {
+        finalMessages.push({ role: 'system', content: canvasToolsPrompt(editor, shape.id) })
+      }
       finalMessages.push({ role: 'user', content: body })
 
       // Вложенные изображения — в vision (поддерживает aiChat)
@@ -1147,14 +1485,25 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
         setError(res.error)
         return
       }
+      // Режим «строить»: вычленяем действия, создаём/заполняем ноды, а в ответ
+      // кладём текст без служебного блока + краткий отчёт о постройке.
+      let answerText = res.content
+      if (buildOn) {
+        const { actions, clean } = parseFlowActions(res.content)
+        if (actions.length) {
+          flash('🛠 Строю на холсте…')
+          const report = await applyFlowActions(editor, shape.id, actions)
+          answerText = (clean || '').trim() + (report ? `\n\n> 🛠 ${report}` : '')
+        }
+      }
       // В историю кладём только реальный диалог (без вставленного поиска)
       const newHistory: ChatMessage[] = [
         ...history,
         { role: 'user', content: body },
-        { role: 'assistant', content: res.content }
+        { role: 'assistant', content: answerText }
       ]
       const tokens = res.totalTokens || Math.round(JSON.stringify(newHistory).length / 4)
-      ensureResultCard(editor, shape.id, res.content)
+      ensureResultCard(editor, shape.id, answerText)
       setAttach([]) // вложения использованы
       if (tokens >= ctxLimit) {
         // Достигли лимита — начинаем контекст заново
@@ -1325,6 +1674,12 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
                 <button onClick={() => setEx({ tools: !toolsOn })} style={menuItemStyle}>
                   {toolsOn ? '✅' : '🔧'}&nbsp; Инструменты MCP {toolsOn ? '· вкл' : '· выкл'}
                 </button>
+                <button onClick={() => setEx({ build: !buildOn })} style={menuItemStyle}>
+                  {buildOn ? '✅' : '🛠'}&nbsp; Строить на холсте {buildOn ? '· вкл' : '· выкл'}
+                </button>
+                <button onClick={() => setEx({ sci: !sciOn })} style={menuItemStyle}>
+                  {sciOn ? '✅' : '🔬'}&nbsp; Научный поиск {sciOn ? '· вкл' : '· выкл'}
+                </button>
               </div>
             )}
           </div>
@@ -1338,6 +1693,16 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
           {toolsOn && (
             <span title="MCP включены" style={pillStyle}>
               🔧
+            </span>
+          )}
+          {buildOn && (
+            <span title="ИИ создаёт/заполняет ноды на холсте" style={pillStyle}>
+              🛠
+            </span>
+          )}
+          {sciOn && (
+            <span title="Научный поиск статей включён" style={pillStyle}>
+              🔬
             </span>
           )}
 
@@ -1640,12 +2005,187 @@ function CodeBlockBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor
 }
 
 // ---------- Тело поиск-ноды (веб-поиск + ответ с источниками) ----------
+type SciPaper = {
+  id: string
+  source: string
+  title: string
+  authors: string[]
+  year: number | null
+  abstract: string
+  doi: string
+  url: string
+  pdfUrl: string
+  oa: boolean
+  venue: string
+}
+
 function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
   const update = useUpdate(editor, shape)
   const { body, model } = shape.props // body = запрос
   const [results, setResults] = useState<{ title: string; url: string; snippet: string }[]>([])
   const [loading, setLoading] = useState<'' | 'search' | 'answer'>('')
   const [error, setError] = useState<string | null>(null)
+  // Научный поиск (статьи из журналов)
+  const [papers, setPapers] = useState<SciPaper[]>([])
+  const [sciLoading, setSciLoading] = useState(false)
+  // Поиск — через OpenAlex (покрывает Elsevier и др.). Elsevier-Search требует
+  // отдельного права API-ключа (часто 401), а полный текст качается по DOI и так.
+  const [useElsevier, setUseElsevier] = useState(false)
+  const [dl, setDl] = useState<string>('') // id статьи, которая скачивается
+  const [sciNote, setSciNote] = useState<string>('') // диагностика источников (напр. Elsevier)
+  const [kbBusy, setKbBusy] = useState(false)
+  const [kbMsg, setKbMsg] = useState('')
+
+  const searchPapers = async () => {
+    if (!body.trim() || sciLoading) return
+    setError(null)
+    setPapers([])
+    setSciNote('')
+    setSciLoading(true)
+    const sources = ['openalex']
+    if (useElsevier) sources.push('elsevier')
+    try {
+      // Естественный запрос → английские ключевые слова (OpenAlex ищет по ним точнее).
+      let q = body.trim()
+      try {
+        const dec = await window.flow.aiChat({
+          model,
+          messages: [
+            {
+              role: 'system',
+              content:
+                'Извлеки из запроса пользователя КЛЮЧЕВЫЕ СЛОВА для поиска научных статей, ПЕРЕВЕДИ на английский. ' +
+                'Ответь ТОЛЬКО строкой из 2–6 ключевых слов через пробел, без кавычек и пояснений. ' +
+                'Убери слова вроде «найди», «статьи», числа.'
+            },
+            { role: 'user', content: body }
+          ]
+        })
+        if (dec.ok) {
+          const kw = dec.content.trim().replace(/^["'`]|["'`]$/g, '').replace(/\s+/g, ' ').slice(0, 120)
+          if (kw) q = kw
+        }
+      } catch {
+        /* без модели ищем по исходному тексту */
+      }
+      // Год из исходного запроса (напр. «2025-2026») → фильтр по дате публикации.
+      const years = (body.match(/\b(20\d{2})\b/g) || []).map(Number).filter((y) => y >= 1990 && y <= 2035)
+      const yearFrom = years.length ? Math.min(...years) : undefined
+      const yearTo = years.length ? Math.max(...years) : undefined
+      const res = await window.flow.papersSearch({ query: q, sources, limit: 25, yearFrom, yearTo })
+      if (res.ok) {
+        setPapers(res.results)
+        const yr = yearFrom ? ` · ${yearFrom}${yearTo && yearTo !== yearFrom ? '–' + yearTo : ''}` : ''
+        setSciNote((res.note ? res.note + '\n' : '') + (res.results.length ? `🔎 запрос: «${q}»${yr}` : ''))
+        if (!res.results.length) setError('Ничего не найдено. Попробуй короче/по-английски (напр. «AI agents LLM») или сними ограничение по году.')
+      } else setError(res.error)
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setSciLoading(false)
+    }
+  }
+
+  // Скачать одну статью → PDF-нода. yOffset — вертикальный сдвиг (для пачки).
+  const fetchToNode = async (p: SciPaper, yOffset: number): Promise<boolean> => {
+    const res = await window.flow.papersPdf({ doi: p.doi, pdfUrl: p.pdfUrl, source: p.source })
+    if (!res.ok) return false
+    const pdfId = 'pdf_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
+    const imp = await window.flow.pdfImport({ base64: res.base64, id: pdfId })
+    if (!imp.ok) return false
+    const b = editor.getShapePageBounds(shape.id as never)
+    const nid = createShapeId()
+    editor.createShape<FlowNodeShape>({
+      id: nid,
+      type: 'flow-node',
+      x: b ? b.maxX + 80 : 0,
+      y: (b ? b.y : 0) + yOffset,
+      props: {
+        kind: 'pdf',
+        title: p.title.slice(0, 90),
+        body: '',
+        history: '[]',
+        extra: JSON.stringify({ pdfId, name: p.title }),
+        w: 480,
+        h: 620,
+        sourceId: String(shape.id)
+      }
+    })
+    connectArrow(editor, shape.id, nid)
+    return true
+  }
+
+  const downloadPaper = async (p: SciPaper) => {
+    if (dl) return
+    setDl(p.id)
+    setError(null)
+    try {
+      const ok = await fetchToNode(p, 0)
+      if (!ok) setError('PDF недоступен (нет open-access и не сработал доступ по подписке)')
+    } catch (e) {
+      setError(String(e))
+    } finally {
+      setDl('')
+    }
+  }
+
+  // Скачать все найденные статьи (до 15) и залить в базу знаний AnythingLLM.
+  const downloadAllToKb = async () => {
+    if (dl || kbBusy) return
+    setKbMsg('')
+    setKbBusy(true)
+    const batch = papers.slice(0, 15)
+    let done = 0
+    let pdfFail = 0
+    let ingestErr = ''
+    for (const p of batch) {
+      try {
+        const res = await window.flow.papersPdf({ doi: p.doi, pdfUrl: p.pdfUrl, source: p.source })
+        if (!res.ok) {
+          pdfFail++
+          continue
+        }
+        const ing = await window.flow.anythingIngest({ base64: res.base64, name: p.title })
+        if (ing.ok) done++
+        else if (!ingestErr) ingestErr = ing.error || 'ошибка заливки'
+      } catch (e) {
+        if (!ingestErr) ingestErr = String(e)
+      }
+    }
+    setKbBusy(false)
+    if (done) {
+      setKbMsg(`📚 Залито ${done} из ${batch.length} в AnythingLLM (workspace «Flow»)`)
+    } else if (ingestErr) {
+      setKbMsg('❌ ' + ingestErr)
+    } else if (pdfFail) {
+      setKbMsg(`❌ PDF не скачались (${pdfFail}) — нет open-access/подписки на эти статьи`)
+    } else {
+      setKbMsg('❌ Не удалось залить')
+    }
+  }
+
+  // Скачать пачкой все найденные статьи (до 15) на доску столбиком.
+  const downloadAll = async () => {
+    if (dl) return
+    setError(null)
+    const batch = papers.slice(0, 15)
+    let done = 0
+    let y = 0
+    for (const p of batch) {
+      setDl('all:' + p.id)
+      try {
+        const ok = await fetchToNode(p, y)
+        if (ok) {
+          done++
+          y += 660 // высота PDF-ноды + отступ
+        }
+      } catch {
+        /* пропускаем недоступные */
+      }
+    }
+    setDl('')
+    setError(done ? `Скачано ${done} из ${batch.length} (остальные без доступа/OA)` : 'Ни одна статья не скачалась (нет доступа/OA)')
+  }
 
   const doSearch = async () => {
     const res = await window.flow.webSearch({ query: body })
@@ -1752,7 +2292,130 @@ function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor })
         </button>
       </div>
 
+      {/* Научный поиск: статьи из журналов (OpenAlex + Elsevier) → PDF-нода с RAG */}
+      <div style={{ display: 'flex', gap: 6, alignItems: 'center' }}>
+        <button
+          onClick={searchPapers}
+          disabled={sciLoading}
+          title="Искать научные статьи (arXiv/PubMed/журналы через OpenAlex + Elsevier)"
+          style={{
+            flex: 1,
+            cursor: sciLoading ? 'default' : 'pointer',
+            border: '1px solid #A78BFA',
+            borderRadius: 10,
+            padding: '7px',
+            fontSize: 12,
+            fontWeight: 600,
+            color: sciLoading ? C.textDim : '#c4b5fd',
+            background: 'rgba(167,139,250,0.10)'
+          }}
+        >
+          {sciLoading ? '🔬 Ищу статьи…' : '🔬 Научные статьи'}
+        </button>
+        <label
+          title="Добавить Elsevier как источник поиска (нужно право ScienceDirect Search у ключа; иначе поиск через OpenAlex, а полный текст всё равно качается по DOI)"
+          style={{ display: 'flex', alignItems: 'center', gap: 4, fontSize: 10.5, color: C.textDim, cursor: 'pointer', flexShrink: 0 }}
+        >
+          <input type="checkbox" checked={useElsevier} onChange={(e) => setUseElsevier(e.currentTarget.checked)} />
+          + Elsevier
+        </label>
+      </div>
+
       {error && <div style={{ fontSize: 11, color: C.red, whiteSpace: 'pre-wrap' }}>{error}</div>}
+      {sciNote && <div style={{ fontSize: 10.5, color: '#FBBF24', whiteSpace: 'pre-wrap', lineHeight: 1.4 }}>⚠ {sciNote}</div>}
+
+      {papers.length > 0 && (
+        <div style={{ display: 'flex', gap: 6, flexShrink: 0 }}>
+          <button
+            onClick={downloadAll}
+            disabled={!!dl || kbBusy}
+            title="Скачать все найденные статьи (до 15) на доску отдельными PDF-нодами"
+            style={{
+              flex: 1,
+              border: `1px solid #A78BFA`,
+              background: 'rgba(167,139,250,0.12)',
+              color: dl || kbBusy ? C.textDim : '#c4b5fd',
+              borderRadius: 8,
+              padding: '6px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: dl || kbBusy ? 'default' : 'pointer'
+            }}
+          >
+            {dl.startsWith('all:') ? '⬇ Скачиваю…' : `⬇ Все на доску (${Math.min(15, papers.length)})`}
+          </button>
+          <button
+            onClick={downloadAllToKb}
+            disabled={!!dl || kbBusy}
+            title="Скачать все найденные статьи и залить в базу знаний AnythingLLM (нужен его API-ключ)"
+            style={{
+              flex: 1,
+              border: `1px solid #14B8A6`,
+              background: 'rgba(20,184,166,0.12)',
+              color: dl || kbBusy ? C.textDim : '#2dd4bf',
+              borderRadius: 8,
+              padding: '6px',
+              fontSize: 12,
+              fontWeight: 600,
+              cursor: dl || kbBusy ? 'default' : 'pointer'
+            }}
+          >
+            {kbBusy ? '📚 Заливаю…' : '📚 В AnythingLLM'}
+          </button>
+        </div>
+      )}
+      {kbMsg && <div style={{ fontSize: 10.5, color: '#2dd4bf', lineHeight: 1.4 }}>{kbMsg}</div>}
+
+      {papers.length > 0 && (
+        <div className="flow-scroll" style={{ flex: 1, overflow: 'auto', display: 'flex', flexDirection: 'column', gap: 9 }}>
+          {papers.map((p) => (
+            <div key={p.id} style={{ borderBottom: '1px solid rgba(255,255,255,0.07)', paddingBottom: 8 }}>
+              <div style={{ display: 'flex', gap: 5, alignItems: 'baseline', flexWrap: 'wrap', marginBottom: 2 }}>
+                {p.oa ? (
+                  <span style={{ fontSize: 8.5, fontWeight: 700, color: '#4ADE80', border: '1px solid rgba(74,222,128,0.4)', borderRadius: 4, padding: '0 4px' }}>OA</span>
+                ) : (
+                  <span style={{ fontSize: 8.5, fontWeight: 700, color: '#FBBF24', border: '1px solid rgba(251,191,36,0.4)', borderRadius: 4, padding: '0 4px' }}>🔒</span>
+                )}
+                <span style={{ fontSize: 8.5, color: C.textDim, border: `1px solid ${C.border}`, borderRadius: 4, padding: '0 4px' }}>{p.source}</span>
+                {p.year ? <span style={{ fontSize: 10, color: C.textDim }}>{p.year}</span> : null}
+              </div>
+              <a
+                onClick={() => p.url && window.flow.openExternal({ url: p.url })}
+                style={{ color: '#c4b5fd', fontSize: 12.5, fontWeight: 600, cursor: 'pointer', display: 'block', lineHeight: 1.35 }}
+              >
+                {p.title}
+              </a>
+              <div style={{ fontSize: 10, color: C.textDim, marginTop: 1 }}>
+                {p.authors.slice(0, 3).join(', ')}
+                {p.authors.length > 3 ? ' и др.' : ''}
+                {p.venue ? ` · ${p.venue}` : ''}
+              </div>
+              {p.abstract && (
+                <div style={{ fontSize: 10.5, color: C.textDim, lineHeight: 1.4, marginTop: 3, maxHeight: 54, overflow: 'hidden' }}>
+                  {p.abstract}
+                </div>
+              )}
+              <button
+                onClick={() => downloadPaper(p)}
+                disabled={!!dl}
+                title="Скачать PDF и создать PDF-ноду (с RAG и Q&A)"
+                style={{
+                  marginTop: 5,
+                  border: `1px solid ${C.border}`,
+                  background: C.field,
+                  color: dl === p.id ? C.textDim : '#c4b5fd',
+                  borderRadius: 7,
+                  padding: '3px 9px',
+                  fontSize: 11,
+                  cursor: dl ? 'default' : 'pointer'
+                }}
+              >
+                {dl === p.id ? '⬇ Скачиваю…' : '⬇ PDF на холст'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
 
       {results.length > 0 && (
         <div
@@ -5270,6 +5933,8 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
     max_recursion_depth?: number
     max_iterations_per_mode?: number
     max_parallel_nodes?: number
+    sci?: boolean
+    sciToKb?: boolean
   } = {}
   try {
     ex = JSON.parse(shape.props.extra || '{}')
@@ -5277,14 +5942,20 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
     /* ignore */
   }
   const setEx = (patch: Record<string, unknown>) => update({ extra: JSON.stringify({ ...ex, ...patch }) })
-  const budgetLimit = ex.project_token_budget ?? 200000
-  const maxDepth = ex.max_recursion_depth ?? 4
-  const maxIter = ex.max_iterations_per_mode ?? 5
-  const maxParallel = ex.max_parallel_nodes ?? 3
+  // Дефолты выкручены на максимум — оркестратор работает мощно «из коробки».
+  const budgetLimit = ex.project_token_budget ?? 1000000
+  const maxDepth = ex.max_recursion_depth ?? 8
+  const maxIter = ex.max_iterations_per_mode ?? 10
+  const maxParallel = ex.max_parallel_nodes ?? 10
   const overlayOn = (ex as { canvasOverlay?: boolean }).canvasOverlay !== false // по умолчанию вкл.
   const overlayEnabledRef = useRef(overlayOn)
   overlayEnabledRef.current = overlayOn
   const overlayForRef = useRef('')
+  // Авто-построение нод из результата после завершения (по умолчанию вкл).
+  const autoBuild = (ex as { autoBuild?: boolean }).autoBuild !== false
+  const autoBuildRef = useRef(autoBuild)
+  autoBuildRef.current = autoBuild
+  const buildRef = useRef<() => void>(() => {})
 
   const [running, setRunning] = useState(false)
   const [projectId, setProjectId] = useState<string>(ex.projectId || '')
@@ -5297,6 +5968,8 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
   const [rootDone, setRootDone] = useState<string>('')
   const [spent, setSpent] = useState(0)
   const [showTrace, setShowTrace] = useState(true)
+  const [copied, setCopied] = useState(false)
+  const [showSettings, setShowSettings] = useState(false)
 
   // Подписки на события движка (один раз). Фильтруем по текущему projectId.
   useEffect(() => {
@@ -5344,6 +6017,10 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
       if (!mine(m.projectId)) return
       setRunning(false)
       setRootDone(`${STATUS_META[m.result.status]?.label ?? m.result.status}: ${m.result.summary}`)
+      // Авто-построение нод из результата: сами подзадачи оркестратора генерируют
+      // текст, а реальные ноды создаёт этот шаг (даёт ИИ «руки» на холсте).
+      // Дадим React дорисовать статусы/трейс (setState в этом же тике), потом строим.
+      if (autoBuildRef.current) setTimeout(() => buildRef.current(), 600)
     })
     const offHuman = window.flow.onOrchHumanRequest((m: OHuman & { project_id: string }) => {
       if (!mine(m.project_id)) return
@@ -5378,6 +6055,36 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
     // сторону): заметки, документы, ответы ИИ, ноутбуки, транскрипты агент-нод.
     // Собираем ПОСЛЕ clearOverlay, чтобы не втянуть собственные оверлей-ноды.
     const ctxParts = gatherChatContext(editor, shape.id, ORCH_SKIP_KINDS)
+    // Научный поиск: подтягиваем свежие статьи по цели в материалы оркестрации.
+    if ((ex as { sci?: boolean }).sci) {
+      try {
+        const pr = await window.flow.papersSearch({ query: goal, sources: ['openalex'], limit: 12 })
+        if (pr.ok && pr.results.length) {
+          const papersTxt = pr.results
+            .map(
+              (p, i) =>
+                `[S${i + 1}] ${p.title} (${p.authors.slice(0, 3).join(', ')}${p.year ? ', ' + p.year : ''})` +
+                (p.doi ? ` DOI:${p.doi}` : '') +
+                (p.abstract ? `\n${p.abstract.slice(0, 600)}` : '')
+            )
+            .join('\n\n')
+          ctxParts.push('НАУЧНЫЕ СТАТЬИ ПО ТЕМЕ (источники, ссылайся как [S1], [S2]):\n' + papersTxt)
+          // Авто-заливка найденных статей в базу знаний AnythingLLM.
+          if ((ex as { sciToKb?: boolean }).sciToKb) {
+            for (const p of pr.results.slice(0, 12)) {
+              try {
+                const res = await window.flow.papersPdf({ doi: p.doi, pdfUrl: p.pdfUrl, source: p.source })
+                if (res.ok) await window.flow.anythingIngest({ base64: res.base64, name: p.title })
+              } catch {
+                /* пропускаем недоступные */
+              }
+            }
+          }
+        }
+      } catch {
+        /* поиск не критичен */
+      }
+    }
     const materials = ctxParts.join('\n\n---\n\n')
     const res = await window.flow.orchStart({
       goal,
@@ -5404,6 +6111,145 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
     if (projectId) await window.flow.orchCancel({ projectId })
     setRunning(false)
   }
+
+  // Собрать «мысли» оркестратора (цель, задачи со статусами, полный трейс, итог)
+  // в читаемый текст и скопировать в буфер обмена.
+  const copyThoughts = async () => {
+    const lines: string[] = []
+    lines.push('=== ОРКЕСТРАТОР ===')
+    lines.push('Цель: ' + (body || '').trim())
+    if (rootDone) lines.push('Итог: ' + rootDone)
+    lines.push(`Бюджет: ${spent} / ${budgetLimit} токенов`)
+    lines.push('')
+    lines.push('ЗАДАЧИ:')
+    for (const t of tasks) {
+      const st = statuses[t.id]?.status || 'pending'
+      const meta = STATUS_META[st] || STATUS_META.pending
+      lines.push(
+        `- [${meta.label}] ${t.id}: ${t.description}` +
+          ` (${MODE_LABEL[statuses[t.id]?.mode || t.mode] || t.mode}` +
+          (t.deps.length ? `, зависит: ${t.deps.join(', ')}` : '') +
+          (t.size === 'large' ? ', крупная' : '') +
+          ')'
+      )
+    }
+    lines.push('')
+    lines.push(`ТРЕЙС ВЫЗОВОВ (${traces.length}):`)
+    // трейс храним новыми-сверху → печатаем в хронологическом порядке
+    for (const tr of [...traces].reverse()) {
+      lines.push(
+        `- ${MODE_LABEL[tr.mode] || tr.mode} · ${tr.node_id} · ${tr.cost.tokens}ток · ${Math.round(tr.duration_ms / 100) / 10}с` +
+          (tr.note ? ` · ${tr.note}` : '')
+      )
+    }
+    try {
+      await navigator.clipboard.writeText(lines.join('\n'))
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1600)
+    } catch {
+      /* буфер недоступен */
+    }
+  }
+
+  // Построить/заполнить ноды из результата оркестрации: одна модель-синтез
+  // превращает наработки в действия на холсте (создать ноутбук/канбан, заполнить
+  // подключённый бэклог и т.п.).
+  const [building, setBuilding] = useState(false)
+  const buildFromResult = async () => {
+    if (building) return
+    const goal = (body || '').trim()
+    if (!goal) return
+    setBuilding(true)
+    try {
+      const notes = [...traces].reverse().map((t) => t.note).filter(Boolean).join('\n').slice(0, 5000)
+      const taskLines = tasks.map((t) => `- ${t.description} [${statuses[t.id]?.status || 'pending'}]`).join('\n')
+      const baseCtx =
+        `Цель проекта: ${goal}\n\nПодзадачи:\n${taskLines}\n` + (notes ? `\nНаработки/мысли:\n${notes}\n` : '')
+      let filled = 0
+      let created = 0
+
+      // 1) ПРИЦЕЛЬНО заполняем каждую уже подключённую ноду отдельным вызовом —
+      // так модель точно наполняет существующую ноду, а не создаёт дубликат.
+      const conn = connectedBuildable(editor, shape.id)
+      for (const node of conn) {
+        try {
+          const k = node.kind
+          const fmt =
+            k === 'notebook'
+              ? 'Верни СТРОГО JSON: {"cells":[{"type":"markdown","source":"# Заголовок\\nтекст"},{"type":"code","source":"рабочий Python"}]}. 8–20 ячеек, чередуй объяснение и код.'
+              : k === 'board'
+                ? 'Верни СТРОГО JSON: {"boards":[{"name":"...","columns":[{"name":"Идеи","cards":["конкретная задача 1","задача 2"]}]}]}. Разложи задачи по колонкам.'
+                : k === 'kanban'
+                  ? 'Верни СТРОГО JSON: {"columns":[{"name":"Нужно сделать","cards":["задача 1","задача 2"]}]}.'
+                  : k === 'list'
+                    ? 'Верни СТРОГО JSON: {"columns":[{"name":"Категория","cards":["пункт 1"]}]}.'
+                    : 'Верни просто markdown-текст (без JSON и пояснений).'
+          const sys =
+            `Ты наполняешь конкретную ноду на холсте (тип «${KIND_NAME[k] || k}») содержимым по цели проекта. ` +
+            fmt +
+            ' Никаких пояснений вне ответа.'
+          const usr = baseCtx + `\nНаполни ноду «${node.title || KIND_NAME[k] || k}» конкретным содержимым по теме.`
+          const r = await window.flow.aiChat({ model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }] })
+          if (!r.ok) continue
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          let data: any = null
+          if (k === 'note' || k === 'doc') data = { body: r.content.trim() }
+          else if (k === 'list') {
+            const m = r.content.match(/\{[\s\S]*\}/)
+            try {
+              const j = m ? JSON.parse(m[0]) : null
+              // list хранит группы иначе — заполним как канбан-подобные колонки в extra.list
+              if (j?.columns) data = j
+            } catch {
+              /* ignore */
+            }
+          } else {
+            const m = r.content.match(/\{[\s\S]*\}/)
+            try {
+              data = m ? JSON.parse(m[0]) : null
+            } catch {
+              /* ignore */
+            }
+          }
+          if (data && k !== 'list' && applyFillToNode(editor, node.id, k, data)) filled++
+        } catch {
+          /* одна нода не должна ронять остальные */
+        }
+      }
+
+      // 2) СОЗДАЁМ недостающие ноды, которые требует цель (только create).
+      const sys2 =
+        'Ты СОЗДАЁШЬ на холсте ноды, которые требует цель проекта и которых ещё НЕТ среди подключённых. ' +
+        'Если всё нужное уже есть среди подключённых — верни пустой список.' +
+        canvasToolsPrompt(editor, shape.id) +
+        '\nВАЖНО: используй ТОЛЬКО op:"create" (подключённые ноды уже заполнены отдельно, их НЕ дублируй).'
+      const res2 = await window.flow.aiChat({
+        model,
+        messages: [{ role: 'system', content: sys2 }, { role: 'user', content: baseCtx + '\nСоздай недостающие ноды (только create).' }]
+      })
+      let extraRep = ''
+      if (res2.ok) {
+        const { actions } = parseFlowActions(res2.content)
+        // Разрешаем create новых нод и papers (поиск+скачивание статей на холст/в базу).
+        const allowed = actions.filter((a) => a?.op === 'create' || a?.op === 'papers')
+        extraRep = await applyFlowActions(editor, shape.id, allowed)
+        const m = extraRep.match(/создано нод: (\d+)/)
+        if (m) created += Number(m[1])
+      }
+
+      const parts: string[] = []
+      if (filled) parts.push(`заполнено нод: ${filled}`)
+      const papersRep = /стат|AnythingLLM/.test(extraRep) ? extraRep : ''
+      if (created) parts.push(`создано нод: ${created}`)
+      if (papersRep) parts.push(papersRep.replace(/создано нод: \d+ ?·? ?/, '').trim())
+      setRootDone((r) => (r ? r + ' · ' : '') + (parts.filter(Boolean).length ? `🛠 ${parts.filter(Boolean).join(' · ')}` : '🛠 нечего строить'))
+    } catch (e) {
+      setRootDone((r) => (r ? r + ' · ' : '') + `🛠 ошибка: ${String(e)}`)
+    } finally {
+      setBuilding(false)
+    }
+  }
+  buildRef.current = buildFromResult // для авто-построения из offDone
 
   const decide = async (req: OHuman, decision: 'approve' | 'reject' | 'edit', feedback?: string) => {
     await window.flow.orchHumanDecision({ projectId, requestId: req.request_id, decision: { decision, feedback } })
@@ -5432,79 +6278,191 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
         style={{ ...fieldStyle, minHeight: 52, maxHeight: 90, resize: 'none', lineHeight: 1.4 }}
       />
 
-      {/* Бюджеты и лимиты */}
-      <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 11, color: C.textDim }}>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          токены
-          <input
-            type="number"
-            value={budgetLimit}
-            onChange={(e) => setEx({ project_token_budget: Number(e.currentTarget.value) || 0 })}
-            style={numStyle}
-          />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          глубина
-          <input
-            type="number"
-            value={maxDepth}
-            onChange={(e) => setEx({ max_recursion_depth: Number(e.currentTarget.value) || 1 })}
-            style={{ ...numStyle, width: 48 }}
-          />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          итер.
-          <input
-            type="number"
-            value={maxIter}
-            onChange={(e) => setEx({ max_iterations_per_mode: Number(e.currentTarget.value) || 1 })}
-            style={{ ...numStyle, width: 48 }}
-          />
-        </label>
-        <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
-          паралл.
-          <input
-            type="number"
-            value={maxParallel}
-            onChange={(e) => setEx({ max_parallel_nodes: Number(e.currentTarget.value) || 1 })}
-            style={{ ...numStyle, width: 48 }}
-          />
-        </label>
+      {/* Контекст по стрелкам + шестерёнка настроек */}
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <div
+          style={{ flex: 1, fontSize: 11, color: connectedCount ? '#4ADE80' : C.textDim }}
+          title="Соедини ноды стрелкой с оркестратором — их содержимое станет контекстом"
+        >
+          🔗 Контекст: {connectedCount ? `${connectedCount} нод по стрелкам` : 'нет (соедини ноды стрелкой)'}
+        </div>
+        <button
+          onClick={() => setShowSettings((v) => !v)}
+          title="Настройки оркестрации (лимиты, бюджет)"
+          style={{
+            border: `1px solid ${showSettings ? C.blue : C.border}`,
+            background: C.field,
+            color: showSettings ? C.blue : C.textDim,
+            borderRadius: 8,
+            padding: '4px 8px',
+            fontSize: 12,
+            cursor: 'pointer',
+            flexShrink: 0
+          }}
+        >
+          ⚙
+        </button>
       </div>
 
-      {/* Контекст по стрелкам: сколько нод подхватится в материалы оркестрации */}
-      <div
-        style={{ fontSize: 11, color: connectedCount ? '#4ADE80' : C.textDim }}
-        title="Соедини ноды стрелкой с оркестратором — их содержимое станет контекстом"
-      >
-        🔗 Контекст: {connectedCount ? `${connectedCount} нод по стрелкам` : 'нет (соедини ноды стрелкой)'}
+      {/* Панель настроек (скрыта под шестерёнкой) */}
+      {showSettings && (
+        <div
+          style={{
+            border: `1px solid ${C.border}`,
+            borderRadius: 10,
+            padding: 10,
+            background: 'rgba(255,255,255,0.02)',
+            display: 'flex',
+            flexDirection: 'column',
+            gap: 8
+          }}
+        >
+          <div style={{ fontSize: 10, color: C.textDim, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+            Лимиты оркестрации
+          </div>
+          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', fontSize: 11, color: C.textDim }}>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              токены
+              <input
+                type="number"
+                value={budgetLimit}
+                onChange={(e) => setEx({ project_token_budget: Number(e.currentTarget.value) || 0 })}
+                style={numStyle}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              глубина
+              <input
+                type="number"
+                value={maxDepth}
+                onChange={(e) => setEx({ max_recursion_depth: Number(e.currentTarget.value) || 1 })}
+                style={{ ...numStyle, width: 48 }}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              итер.
+              <input
+                type="number"
+                value={maxIter}
+                onChange={(e) => setEx({ max_iterations_per_mode: Number(e.currentTarget.value) || 1 })}
+                style={{ ...numStyle, width: 48 }}
+              />
+            </label>
+            <label style={{ display: 'flex', alignItems: 'center', gap: 3 }}>
+              паралл.
+              <input
+                type="number"
+                value={maxParallel}
+                onChange={(e) => setEx({ max_parallel_nodes: Number(e.currentTarget.value) || 1 })}
+                style={{ ...numStyle, width: 48 }}
+              />
+            </label>
+          </div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textDim, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={overlayOn}
+              onChange={(e) => setEx({ canvasOverlay: e.currentTarget.checked })}
+            />
+            🗺 Раскладывать подзадачи нодами на холсте
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textDim, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={autoBuild}
+              onChange={(e) => setEx({ autoBuild: e.currentTarget.checked })}
+            />
+            🛠 Авто-строить ноды из результата (ноутбук/канбан/заполнение)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textDim, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={!!(ex as { sci?: boolean }).sci}
+              onChange={(e) => setEx({ sci: e.currentTarget.checked })}
+            />
+            🔬 Научный поиск статей (подтягивать в материалы)
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textDim, cursor: 'pointer' }}>
+            <input
+              type="checkbox"
+              checked={!!(ex as { sciToKb?: boolean }).sciToKb}
+              onChange={(e) => setEx({ sciToKb: e.currentTarget.checked })}
+            />
+            📚 Скачивать найденные статьи в AnythingLLM (базу знаний)
+          </label>
+          <button
+            onClick={() =>
+              setEx({
+                project_token_budget: 1000000,
+                max_recursion_depth: 8,
+                max_iterations_per_mode: 10,
+                max_parallel_nodes: 10
+              })
+            }
+            style={{ ...smallBtn(C.blue), flex: 'none', alignSelf: 'flex-start', padding: '3px 10px' }}
+          >
+            ↺ Сбросить на максимум
+          </button>
+        </div>
+      )}
+
+      <div style={{ display: 'flex', gap: 6 }}>
+        <button
+          className="flow-run-btn"
+          onClick={running ? cancel : start}
+          style={{
+            flex: 1,
+            cursor: 'pointer',
+            border: 'none',
+            borderRadius: 10,
+            padding: '8px 10px',
+            fontSize: 13,
+            fontWeight: 600,
+            color: '#0E0F12',
+            background: running ? '#F87171' : KINDS.orchestrator.grad
+          }}
+        >
+          {running ? '■ Стоп' : '▶ Запустить оркестрацию'}
+        </button>
+        {(tasks.length > 0 || traces.length > 0) && (
+          <button
+            onClick={copyThoughts}
+            title="Скопировать мысли оркестратора (задачи + трейс + итог)"
+            style={{
+              flex: 'none',
+              cursor: 'pointer',
+              border: `1px solid ${C.border}`,
+              borderRadius: 10,
+              padding: '8px 11px',
+              fontSize: 12,
+              color: copied ? '#4ADE80' : C.text,
+              background: C.field
+            }}
+          >
+            {copied ? '✓' : '📋 Мысли'}
+          </button>
+        )}
       </div>
 
-      <label style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textDim, cursor: 'pointer' }}>
-        <input
-          type="checkbox"
-          checked={overlayOn}
-          onChange={(e) => setEx({ canvasOverlay: e.currentTarget.checked })}
-        />
-        🗺 Разложить подзадачи нодами на холсте
-      </label>
-
-      <button
-        className="flow-run-btn"
-        onClick={running ? cancel : start}
-        style={{
-          cursor: 'pointer',
-          border: 'none',
-          borderRadius: 10,
-          padding: '8px 10px',
-          fontSize: 13,
-          fontWeight: 600,
-          color: '#0E0F12',
-          background: running ? '#F87171' : KINDS.orchestrator.grad
-        }}
-      >
-        {running ? '■ Отмена' : '▶ Запустить оркестрацию'}
-      </button>
+      {!running && tasks.length > 0 && (
+        <button
+          onClick={buildFromResult}
+          disabled={building}
+          title="Собрать результат нодами на холсте: создать ноутбук/канбан/заметки и заполнить подключённые ноды"
+          style={{
+            cursor: building ? 'default' : 'pointer',
+            border: `1px solid #A78BFA`,
+            borderRadius: 10,
+            padding: '7px 10px',
+            fontSize: 12,
+            fontWeight: 600,
+            color: building ? C.textDim : '#c4b5fd',
+            background: 'rgba(167,139,250,0.10)'
+          }}
+        >
+          {building ? '🛠 Строю ноды…' : '🛠 Построить ноды из результата'}
+        </button>
+      )}
 
       {/* Бар бюджета */}
       <div>
@@ -5597,20 +6555,33 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
         </div>
       )}
 
-      {/* Лента трейса */}
+      {/* Лента трейса — «мысли» оркестратора */}
       <div>
-        <div
-          onClick={() => setShowTrace((v) => !v)}
-          style={{ fontSize: 10.5, color: C.textDim, cursor: 'pointer', userSelect: 'none' }}
-        >
-          {showTrace ? '▾' : '▸'} трейс вызовов ({traces.length})
+        <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+          <span
+            onClick={() => setShowTrace((v) => !v)}
+            style={{ fontSize: 10.5, color: C.textDim, cursor: 'pointer', userSelect: 'none' }}
+          >
+            {showTrace ? '▾' : '▸'} 🧠 мысли · трейс вызовов ({traces.length})
+          </span>
+          <div style={{ flex: 1 }} />
+          {traces.length > 0 && (
+            <button
+              onClick={copyThoughts}
+              title="Скопировать в буфер"
+              style={{ border: 'none', background: 'none', color: copied ? '#4ADE80' : C.textDim, cursor: 'pointer', fontSize: 10.5 }}
+            >
+              {copied ? '✓' : '📋 копировать'}
+            </button>
+          )}
         </div>
         {showTrace && traces.length > 0 && (
-          <div className="flow-scroll" style={{ maxHeight: 96, overflow: 'auto', marginTop: 4 }}>
-            {traces.slice(0, 40).map((tr, i) => (
-              <div key={i} style={{ fontSize: 10, color: C.textDim, padding: '1px 0', fontFamily: 'monospace' }}>
+          <div className="flow-scroll" style={{ maxHeight: 220, overflow: 'auto', marginTop: 4 }}>
+            {traces.slice(0, 120).map((tr, i) => (
+              <div key={i} style={{ fontSize: 10, color: C.textDim, padding: '2px 0', fontFamily: 'monospace', lineHeight: 1.4, borderBottom: `1px solid rgba(255,255,255,0.03)` }}>
                 <span style={{ color: C.blue }}>{MODE_LABEL[tr.mode] || tr.mode}</span> · {tr.node_id} ·{' '}
-                {tr.cost.tokens}ток · {Math.round(tr.duration_ms / 100) / 10}с{tr.note ? ` · ${tr.note}` : ''}
+                {tr.cost.tokens}ток · {Math.round(tr.duration_ms / 100) / 10}с
+                {tr.note ? <div style={{ color: C.text, whiteSpace: 'pre-wrap', opacity: 0.85 }}>{tr.note}</div> : null}
               </div>
             ))}
           </div>

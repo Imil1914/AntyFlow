@@ -32,6 +32,10 @@ declare global {
         comfyCmd: string
         comfyCwd: string
         lmsCmd: string
+        elsevierKey: string
+        elsevierInsttoken: string
+        unpaywallEmail: string
+        anythingllmKey: string
       }>
       saveSettings: (s: {
         defaultModel?: string
@@ -39,6 +43,10 @@ declare global {
         comfyCmd?: string
         comfyCwd?: string
         lmsCmd?: string
+        elsevierKey?: string
+        elsevierInsttoken?: string
+        unpaywallEmail?: string
+        anythingllmKey?: string
       }) => Promise<{ ok: boolean; error?: string }>
       servicesStatus: () => Promise<{ comfy: boolean; lm: boolean }>
       startService: (args: { name: 'comfy' | 'lm' }) => Promise<{ ok: true }>
@@ -55,6 +63,41 @@ declare global {
       killCode: (args: { id: string }) => Promise<{ ok: true }>
       webSearch: (args: { query: string }) => Promise<
         | { ok: true; results: Array<{ title: string; url: string; snippet: string }> }
+        | { ok: false; error: string }
+      >
+      papersSearch: (args: { query: string; sources?: string[]; limit?: number; yearFrom?: number; yearTo?: number }) => Promise<
+        | {
+            ok: true
+            note?: string
+            results: Array<{
+              id: string
+              source: string
+              title: string
+              authors: string[]
+              year: number | null
+              abstract: string
+              doi: string
+              url: string
+              pdfUrl: string
+              oa: boolean
+              venue: string
+            }>
+          }
+        | { ok: false; error: string }
+      >
+      papersPdf: (args: { doi?: string; pdfUrl?: string; source?: string }) => Promise<
+        { ok: true; base64: string } | { ok: false; error: string }
+      >
+      papersTestElsevier: () => Promise<
+        | {
+            ok: true
+            key: 'ok' | 'fail' | 'none'
+            keyMsg: string
+            token: 'ok' | 'fail' | 'none'
+            tokenMsg: string
+            fulltext: 'ok' | 'fail' | 'none'
+            ftMsg: string
+          }
         | { ok: false; error: string }
       >
       openExternal: (args: { url: string }) => Promise<{ ok: true }>
@@ -146,6 +189,7 @@ declare global {
         error: string
       }>
       anythingStop: () => Promise<{ ok: true }>
+      anythingIngest: (args: { base64: string; name: string }) => Promise<{ ok: boolean; error?: string }>
       onAnythingProgress: (cb: (p: { phase: string; message: string }) => void) => () => void
       openscienceEnsure: (args?: { cwd?: string }) => Promise<{ ok: boolean; url?: string; error?: string }>
       openscienceState: () => Promise<{

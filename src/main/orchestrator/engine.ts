@@ -99,7 +99,10 @@ export async function orchestrate(rt: Runtime, opts: OrchestrateOpts): Promise<T
         max_iterations: budget.max_iterations_per_mode,
         max_depth: budget.max_recursion_depth
       },
-      timeout_ms: 150000
+      // Рекурсивные/крупные подзадачи запускают саб-оркестратор и легко идут
+      // дольше 2.5 мин — им даём 12 мин, обычным — 4 мин (было 150с на всё, из-за
+      // чего рекурсивные задачи ложно падали по таймауту).
+      timeout_ms: mode === 'recursive' || t.size === 'large' ? 720000 : 240000
     }
     const candidates = await rt.findCandidates({}) // все роли; режим выбирает нужные
     const ctx: ModeContext = { rt, task: t, command, candidates, budget }

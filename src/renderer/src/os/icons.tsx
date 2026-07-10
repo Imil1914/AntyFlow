@@ -20,6 +20,38 @@ export function IconFiles({ size = 16 }: IconProps) {
   )
 }
 
+// Холст — доска-фрейм с двумя связанными нодами (символ бесконечного холста Flow)
+export function IconCanvas({ size = 16 }: IconProps) {
+  return (
+    <svg {...base(size)}>
+      <rect x="2" y="3" width="12" height="10" rx="1.6" />
+      <circle cx="5.6" cy="6.8" r="1.3" />
+      <circle cx="10.4" cy="9.6" r="1.3" />
+      <line x1="6.7" y1="7.6" x2="9.3" y2="8.8" />
+    </svg>
+  )
+}
+
+// Логотип Obsidian — фиолетовый гранёный кристалл (для ноды заметок).
+// Задаём собственный градиент/цвет, поэтому не наследует currentColor.
+export function IconObsidian({ size = 16 }: IconProps) {
+  return (
+    <svg width={size} height={size} viewBox="0 0 16 16" fill="none">
+      <path
+        d="M4.3 2.9 H11.7 L14 6.3 L8 14.4 L2 6.3 Z"
+        fill="#7C3AED"
+        stroke="#A78BFA"
+        strokeWidth={0.8}
+        strokeLinejoin="round"
+      />
+      <path d="M4.3 2.9 L6.1 6.3 L2 6.3" stroke="#C4B5FD" strokeWidth={0.7} fill="none" strokeLinejoin="round" />
+      <path d="M11.7 2.9 L9.9 6.3 L14 6.3" stroke="#C4B5FD" strokeWidth={0.7} fill="none" strokeLinejoin="round" />
+      <path d="M6.1 6.3 L8 14.4 L9.9 6.3 Z" fill="#6D28D9" stroke="none" />
+      <line x1="2" y1="6.3" x2="14" y2="6.3" stroke="#C4B5FD" strokeWidth={0.7} />
+    </svg>
+  )
+}
+
 export function IconGraph({ size = 16 }: IconProps) {
   return (
     <svg {...base(size)}>

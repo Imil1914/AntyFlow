@@ -4,6 +4,10 @@ out/
 dist/
 release/
 
+# Сайдкары (крупные бинарники: OpenCode, приватный Node, OpenScience, AnythingLLM).
+# Наполняется scripts/prepare-sidecars.mjs, в git не коммитим.
+sidecars/
+
 # Логи и мусор ОС
 *.log
 .DS_Store

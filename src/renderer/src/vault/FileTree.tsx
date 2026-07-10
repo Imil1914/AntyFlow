@@ -115,23 +115,32 @@ function Row({
         style={{
           display: 'flex',
           alignItems: 'center',
-          gap: 4,
-          padding: '3px 8px',
-          paddingLeft: 8 + depth * 14,
-          borderRadius: 6,
+          gap: 7,
+          padding: '6px 9px',
+          paddingLeft: 9 + depth * 16,
+          borderRadius: 8,
           cursor: 'pointer',
-          fontSize: 13,
-          color: isActive ? 'var(--text)' : 'var(--muted)',
-          background: isActive ? 'var(--panel-2, rgba(255,255,255,0.06))' : dragOver ? 'rgba(34,211,238,0.15)' : 'transparent',
+          fontSize: 14,
+          fontWeight: isActive ? 600 : 400,
+          color: isActive ? 'var(--text)' : isDir ? 'var(--text)' : 'var(--muted)',
+          background: isActive
+            ? 'color-mix(in srgb, var(--accent) 16%, transparent)'
+            : dragOver
+              ? 'rgba(34,211,238,0.15)'
+              : 'transparent',
+          boxShadow: isActive ? 'inset 2px 0 0 var(--accent)' : 'none',
           userSelect: 'none',
           whiteSpace: 'nowrap',
-          overflow: 'hidden'
+          overflow: 'hidden',
+          transition: 'background .1s'
         }}
       >
-        <span style={{ width: 12, flexShrink: 0, opacity: 0.7, fontSize: 10 }}>
+        <span style={{ width: 13, flexShrink: 0, opacity: 0.6, fontSize: 11 }}>
           {isDir ? (isOpen ? '▾' : '▸') : ''}
         </span>
-        <span style={{ flexShrink: 0, opacity: 0.85 }}>{isDir ? (isOpen ? '📂' : '📁') : '📄'}</span>
+        <span style={{ flexShrink: 0, fontSize: 15, opacity: isDir ? 1 : 0.75, lineHeight: 1 }}>
+          {isDir ? (isOpen ? '📂' : '📁') : '📄'}
+        </span>
         {renaming === entry.path ? (
           <RenameInput initial={label} onCommit={(name) => onRenameCommit(entry, name)} onCancel={onRenameCancel} />
         ) : (

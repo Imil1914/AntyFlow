@@ -6,7 +6,9 @@
 import { app } from 'electron'
 import { spawn, type ChildProcess } from 'child_process'
 import { join } from 'path'
-import { existsSync, mkdirSync, appendFileSync } from 'fs'
+import { homedir } from 'os'
+import { existsSync, mkdirSync, appendFileSync, unlinkSync, rmSync } from 'fs'
+import { opensciBin } from './sidecars'
 
 const PORT = 8790
 export type OsPhase = 'idle' | 'starting' | 'running' | 'error'
@@ -130,14 +132,30 @@ export async function ensureOpenscience(cwd?: string): Promise<{ ok: boolean; ur
     // BROWSER=none — на случай, если serve всё же попробует открыть браузер.
     const env = { ...process.env, BROWSER: 'none', CI: '1' }
     serverCwd = targetCwd // «проект» openscience определяется рабочей папкой
+    // Вложенный бинарник (resources/bin/openscience.exe) в приоритете; иначе — из PATH.
+    const bin = opensciBin()
+    if (bin) {
+      // Upstream-обёртка перед стартом чистит эти файлы в ~/.openscience —
+      // без них Bun-бинарник иногда «залипает». Повторяем при прямом запуске .exe.
+      const osDir = join(homedir(), '.openscience')
+      for (const poison of ['package.json', '.gitignore', 'bun.lockb', 'bunfig.toml']) {
+        try {
+          unlinkSync(join(osDir, poison))
+        } catch {
+          /* нет файла — ок */
+        }
+      }
+      try {
+        rmSync(join(osDir, 'node_modules'), { recursive: true, force: true })
+      } catch {
+        /* ignore */
+      }
+    }
     let p: ChildProcess
     try {
-      p = spawn('openscience serve --port ' + PORT, {
-        shell: true,
-        cwd: targetCwd,
-        env,
-        windowsHide: true
-      })
+      p = bin
+        ? spawn(bin, ['serve', '--port', String(PORT)], { cwd: targetCwd, env, windowsHide: true })
+        : spawn('openscience serve --port ' + PORT, { shell: true, cwd: targetCwd, env, windowsHide: true })
     } catch (e) {
       lastError = String(e)
       setPhase('error', lastError)

@@ -24,6 +24,10 @@ const api = {
   killCode: (args: { id: string }) => ipcRenderer.invoke('code:kill', args),
   // Веб-поиск и открытие ссылок
   webSearch: (args: { query: string }) => ipcRenderer.invoke('web:search', args),
+  papersSearch: (args: { query: string; sources?: string[]; limit?: number; yearFrom?: number; yearTo?: number }) =>
+    ipcRenderer.invoke('papers:search', args),
+  papersPdf: (args: { doi?: string; pdfUrl?: string; source?: string }) => ipcRenderer.invoke('papers:pdf', args),
+  papersTestElsevier: () => ipcRenderer.invoke('papers:testElsevier'),
   openExternal: (args: { url: string }) => ipcRenderer.invoke('shell:open', args),
   saveFile: (args: { base64: string; name: string }) => ipcRenderer.invoke('file:save', args),
   // Извлечь текст из PDF / DOCX / PPTX (для вложений в ИИ-ноду)
@@ -90,6 +94,7 @@ const api = {
   anythingEnsure: () => ipcRenderer.invoke('anythingllm:ensure'),
   anythingState: () => ipcRenderer.invoke('anythingllm:state'),
   anythingStop: () => ipcRenderer.invoke('anythingllm:stop'),
+  anythingIngest: (args: { base64: string; name: string }) => ipcRenderer.invoke('anythingllm:ingest', args),
   onAnythingProgress: (cb: (p: { phase: string; message: string }) => void) => {
     const h = (_e: unknown, p: { phase: string; message: string }) => cb(p)
     ipcRenderer.on('anythingllm:progress', h)

@@ -16,8 +16,9 @@ import { FlowArrowShapeUtil, FlowNodeShapeUtil, NodeFullscreenOverlay, sheetMode
 import { DESIGN_CSS } from './slides/design'
 import SlideEditor from './slides/SlideEditor'
 import { OS_CSS, themeVars, THEME_ORDER, THEME_SWATCH, type ThemeName } from './os/theme'
-import { IconFiles, IconGraph, IconAgents, IconGen, IconSettings } from './os/icons'
+import { IconCanvas, IconObsidian, IconGraph, IconAgents, IconGen, IconSettings } from './os/icons'
 import { NodeIcon, GroupIcon } from './os/nodeIcons'
+import { HierarchyPanel } from './os/HierarchyPanel'
 import {
   Toast,
   CmdK,
@@ -566,6 +567,36 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [comfyCmd, setComfyCmd] = useState('')
   const [comfyCwd, setComfyCwd] = useState('')
   const [lmsCmd, setLmsCmd] = useState('')
+  // Научные источники
+  const [elsevierKey, setElsevierKey] = useState('')
+  const [elsevierInsttoken, setElsevierInsttoken] = useState('')
+  const [unpaywallEmail, setUnpaywallEmail] = useState('')
+  const [anythingllmKey, setAnythingllmKey] = useState('')
+  const [elsTest, setElsTest] = useState<string>('')
+  const [elsTesting, setElsTesting] = useState(false)
+  const testElsevier = async () => {
+    setElsTesting(true)
+    setElsTest('')
+    try {
+      // сохраняем текущие ключи перед проверкой, чтобы тест использовал их
+      await window.flow.saveSettings({ elsevierKey, elsevierInsttoken, unpaywallEmail })
+      const r = await window.flow.papersTestElsevier()
+      if (!r.ok) {
+        setElsTest('Ошибка: ' + r.error)
+        return
+      }
+      const mark = (s: string) => (s === 'ok' ? '✅' : s === 'fail' ? '❌' : '➖')
+      setElsTest(
+        `${mark(r.key)} Ключ (поиск): ${r.keyMsg}\n` +
+          `${mark(r.token)} Токен: ${r.tokenMsg}\n` +
+          `${mark(r.fulltext)} Полный текст: ${r.ftMsg}`
+      )
+    } catch (e) {
+      setElsTest('Ошибка: ' + String(e))
+    } finally {
+      setElsTesting(false)
+    }
+  }
   const [svc, setSvc] = useState<{ comfy: boolean; lm: boolean } | null>(null)
   const [startup, setStartup] = useState(false)
 
@@ -586,6 +617,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         setComfyCmd(s.comfyCmd || '')
         setComfyCwd(s.comfyCwd || '')
         setLmsCmd(s.lmsCmd || '')
+        setElsevierKey(s.elsevierKey || '')
+        setElsevierInsttoken(s.elsevierInsttoken || '')
+        setUnpaywallEmail(s.unpaywallEmail || '')
+        setAnythingllmKey(s.anythingllmKey || '')
       })
       .catch(() => {})
     window.flow?.mcpList().then(setMcp).catch(() => setMcp([]))
@@ -605,7 +640,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   const save = async () => {
     await window.flow.saveProviders(providers)
-    await window.flow.saveSettings({ defaultModel, autoStart, comfyCmd, comfyCwd, lmsCmd })
+    await window.flow.saveSettings({ defaultModel, autoStart, comfyCmd, comfyCwd, lmsCmd, elsevierKey, elsevierInsttoken, unpaywallEmail, anythingllmKey })
     await window.flow.mcpSave(
       mcp.map(({ id, name, command, args, env, enabled }) => ({ id, name, command, args, env, enabled }))
     )
@@ -780,6 +815,78 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
           <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.45 }}>
             Подсказка: LM Studio — установи CLI и укажи <code>lms server start</code>. ComfyUI — путь к своему .bat-файлу
             запуска. Команды сохрани кнопкой ниже.
+          </div>
+
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <div style={{ fontSize: 13, fontWeight: 600 }}>🔬 Научные источники (поиск статей)</div>
+          <input
+            className="flow-set-input"
+            placeholder="Email для Unpaywall (легальный бесплатный PDF по DOI)"
+            value={unpaywallEmail}
+            onChange={(e) => setUnpaywallEmail(e.currentTarget.value)}
+            onBlur={(e) => window.flow?.saveSettings({ unpaywallEmail: e.currentTarget.value.trim() })}
+          />
+          <input
+            className="flow-set-input"
+            placeholder="Elsevier API-ключ (dev.elsevier.com)"
+            value={elsevierKey}
+            onChange={(e) => setElsevierKey(e.currentTarget.value)}
+            onBlur={(e) => window.flow?.saveSettings({ elsevierKey: e.currentTarget.value.trim() })}
+          />
+          <input
+            className="flow-set-input"
+            placeholder="Elsevier Institutional Token (для полного текста вне сети института)"
+            value={elsevierInsttoken}
+            onChange={(e) => setElsevierInsttoken(e.currentTarget.value)}
+            onBlur={(e) => window.flow?.saveSettings({ elsevierInsttoken: e.currentTarget.value.trim() })}
+          />
+          <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+            <button
+              onClick={testElsevier}
+              disabled={elsTesting}
+              style={{
+                border: '1px solid var(--accent)',
+                background: 'var(--accent-dim)',
+                color: 'var(--accent)',
+                borderRadius: 8,
+                padding: '5px 12px',
+                fontSize: 12,
+                cursor: elsTesting ? 'default' : 'pointer'
+              }}
+            >
+              {elsTesting ? '⏳ Проверяю…' : '🔍 Проверить Elsevier'}
+            </button>
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>(сохранит ключи и протестирует доступ)</span>
+          </div>
+          {elsTest && (
+            <div
+              style={{
+                fontSize: 11.5,
+                color: 'var(--text)',
+                whiteSpace: 'pre-wrap',
+                lineHeight: 1.6,
+                background: 'var(--panel-2, rgba(255,255,255,0.04))',
+                border: '1px solid var(--border)',
+                borderRadius: 8,
+                padding: '8px 10px'
+              }}
+            >
+              {elsTest}
+            </div>
+          )}
+          <input
+            className="flow-set-input"
+            placeholder="AnythingLLM API-ключ (для заливки статей в базу знаний)"
+            value={anythingllmKey}
+            onChange={(e) => setAnythingllmKey(e.currentTarget.value)}
+            onBlur={(e) => window.flow?.saveSettings({ anythingllmKey: e.currentTarget.value.trim() })}
+          />
+          <div style={{ fontSize: 10.5, color: '#4ADE80' }}>Ключи сохраняются автоматически при выходе из поля.</div>
+          <div style={{ fontSize: 11, color: 'var(--muted)', lineHeight: 1.45 }}>
+            OpenAlex (arXiv/PubMed/журналы) работает без ключей. Для полного текста Elsevier нужен API-ключ
+            и, вне сети института, <b>institutional token</b> (запроси в библиотеке института). Без токена — только абстракты.
+            <b>AnythingLLM-ключ</b> — сгенерируй в самом AnythingLLM (Settings → Developer API), тогда ИИ/оркестратор
+            смогут заливать статьи в его базу знаний. Ключи хранятся локально.
           </div>
 
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
@@ -1283,9 +1390,46 @@ export default function App() {
   const [agentsOpen, setAgentsOpen] = useState(false)
   const [genOpen, setGenOpen] = useState(false)
   const [vaultOpen, setVaultOpen] = useState(false)
+  // Навигация по разделам сайдбара: открытие одного оверлея закрывает остальные,
+  // «Холст» = все закрыты (пользователь работает на доске).
+  const anyOverlayOpen = vaultOpen || graphOpen || agentsOpen || genOpen || settingsOpen
+  const closeAllOverlays = () => {
+    setVaultOpen(false)
+    setGraphOpen(false)
+    setAgentsOpen(false)
+    setGenOpen(false)
+    setSettingsOpen(false)
+  }
+  const openOverlay = (which: 'vault' | 'graph' | 'agents' | 'gen' | 'settings') => {
+    setVaultOpen(which === 'vault')
+    setGraphOpen(which === 'graph')
+    setAgentsOpen(which === 'agents')
+    setGenOpen(which === 'gen')
+    setSettingsOpen(which === 'settings')
+  }
+  // Открыть доску холста по имени (клик по [[[доске]]] в заметке Obsidian).
+  // Нет такой доски — создаём новую с этим именем. Затем закрываем оверлеи → на холст.
+  const openBoardByName = (name: string) => {
+    const nm = name.trim()
+    if (!nm) return
+    const found = boards.find((b) => b.name.toLowerCase() === nm.toLowerCase())
+    if (found) {
+      setCurrentBoardId(found.id)
+    } else {
+      const id = 'b' + Date.now().toString(36)
+      setBoards((x) => [...x, { id, name: nm, key: 'flow-board-' + id }])
+      setCurrentBoardId(id)
+      showToast('Создана доска «' + nm + '»')
+    }
+    closeAllOverlays()
+  }
   const [flyout, setFlyout] = useState<{ id: string; top: number } | null>(null)
   const [mobileOpen, setMobileOpen] = useState(false)
   const [sidebarOpen, setSidebarOpen] = useState(false) // раздвижной сайдбар
+  const [hierarchyOpen, setHierarchyOpen] = useState(() => localStorage.getItem('flow-hier-open') !== '0')
+  useEffect(() => {
+    localStorage.setItem('flow-hier-open', hierarchyOpen ? '1' : '0')
+  }, [hierarchyOpen])
   const [toast, setToast] = useState<string | null>(null)
 
   const showToast = useCallback((msg: string) => {
@@ -1341,6 +1485,25 @@ export default function App() {
         y = c.y - h / 2
       }
       editor.createShape<FlowNodeShape>({ id, type: 'flow-node', x, y, props: { kind, title, w, h } })
+      editor.select(id)
+    },
+    [editor]
+  )
+
+  // Отправить заметку из редактора нодой на холст (кнопка «→ Отправить на холст»)
+  const sendNoteToCanvas = useCallback(
+    (title: string, md: string) => {
+      if (!editor) return
+      const id = createShapeId()
+      const { w, h } = sizeFor('note')
+      const c = editor.getViewportPageBounds().center
+      editor.createShape<FlowNodeShape>({
+        id,
+        type: 'flow-node',
+        x: c.x - w / 2,
+        y: c.y - h / 2,
+        props: { kind: 'note', title, body: md, w, h }
+      })
       editor.select(id)
     },
     [editor]
@@ -1701,11 +1864,12 @@ export default function App() {
             </span>
           </button>
 
-          <RailItem icon={<IconFiles />} label="Заметки" active onClick={() => setVaultOpen(true)} />
-          <RailItem icon={<IconGraph />} label="Граф знаний" onClick={() => setGraphOpen(true)} />
-          <RailItem icon={<IconAgents />} label="Агенты" onClick={() => setAgentsOpen(true)} />
-          <RailItem icon={<IconGen />} label="Генеративная студия" onClick={() => setGenOpen(true)} />
-          <RailItem icon={<IconSettings />} label="Настройки" onClick={() => setSettingsOpen(true)} />
+          <RailItem icon={<IconCanvas />} label="Холст" active={!anyOverlayOpen} onClick={closeAllOverlays} />
+          <RailItem icon={<IconObsidian />} label="Заметки" active={vaultOpen} onClick={() => openOverlay('vault')} />
+          <RailItem icon={<IconGraph />} label="Граф знаний" active={graphOpen} onClick={() => openOverlay('graph')} />
+          <RailItem icon={<IconAgents />} label="Агенты" active={agentsOpen} onClick={() => openOverlay('agents')} />
+          <RailItem icon={<IconGen />} label="Генеративная студия" active={genOpen} onClick={() => openOverlay('gen')} />
+          <RailItem icon={<IconSettings />} label="Настройки" active={settingsOpen} onClick={() => openOverlay('settings')} />
 
           <div style={{ height: 1, background: 'var(--border)', margin: '8px 4px' }} />
           {sidebarOpen && (
@@ -1740,6 +1904,31 @@ export default function App() {
             />
           ))}
         </div>
+
+        {/* Панель иерархии нод (кто с кем связан) — между вкладками и холстом */}
+        {hierarchyOpen ? (
+          <HierarchyPanel editor={editor} onClose={() => setHierarchyOpen(false)} />
+        ) : (
+          <button
+            onClick={() => setHierarchyOpen(true)}
+            title="Показать иерархию нод"
+            style={{
+              flexShrink: 0,
+              width: 22,
+              border: 'none',
+              borderRight: '1px solid var(--border)',
+              background: 'var(--panel)',
+              color: 'var(--muted)',
+              cursor: 'pointer',
+              fontSize: 13,
+              writingMode: 'vertical-rl',
+              padding: '10px 0',
+              letterSpacing: '.05em'
+            }}
+          >
+            » Иерархия
+          </button>
+        )}
 
         {/* Холст */}
         <div
@@ -1985,7 +2174,14 @@ export default function App() {
         onToCanvas={() => addNode('note', 'Заметка')}
       />
 
-      <VaultView open={vaultOpen} onClose={() => setVaultOpen(false)} onToast={showToast} />
+      <VaultView
+        open={vaultOpen}
+        onClose={() => setVaultOpen(false)}
+        onToast={showToast}
+        boards={boards.map((b) => b.name)}
+        onOpenBoard={openBoardByName}
+        onSendToCanvas={sendNoteToCanvas}
+      />
 
       {settingsOpen && <SettingsPanel onClose={() => setSettingsOpen(false)} />}
       {editSlideId && editor && (
