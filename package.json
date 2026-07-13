@@ -1,6 +1,6 @@
 {
   "name": "flow",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Локальный AI-холст (Figma + Miro + Docs + локальные модели)",
   "main": "./out/main/index.js",
   "author": "Flow",
