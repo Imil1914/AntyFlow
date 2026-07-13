@@ -2,14 +2,14 @@ import { app, BrowserWindow, ipcMain, shell, dialog, Menu, type WebContents } fr
 import { join } from 'path'
 import { spawn } from 'child_process'
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch'
-import { ensureAnything, anyState, stopAnything, onAnyProgress, ingestDocument } from './anythingllm'
+import { ensureAnything, anyState, stopAnything, onAnyProgress, ingestDocument, removeDocument } from './anythingllm'
 import { ensureOpenscience, opensciState, stopOpenscience, onOpensciProgress } from './openscience'
 import { registerNotebookIpc, stopAllKernels } from './notebook'
 import { registerPdfIpc, searchPdf } from './pdf'
 import { registerOrchestratorIpc, stopAllOrchestrations } from './orchestrator'
 import { registerVaultIpc, stopVaultWatcher } from './vault'
 import { registerCanvasSyncIpc } from './canvas-sync'
-import { registerPapersIpc } from './papers'
+import { registerPapersIpc, searchPapersDirect, fetchPaperPdfDirect } from './papers'
 import { opencodeBin } from './sidecars'
 
 registerNotebookIpc()
@@ -22,7 +22,21 @@ registerPapersIpc(() => {
   return { elsevierKey: s.elsevierKey, elsevierInsttoken: s.elsevierInsttoken, unpaywallEmail: s.unpaywallEmail }
 })
 // callModel и getSettings — function declarations (hoisted), поэтому доступны здесь.
-registerOrchestratorIpc({ callModel, getDefaultModel: () => getSettings().defaultModel })
+registerOrchestratorIpc({
+  callModel,
+  getDefaultModel: () => getSettings().defaultModel,
+  // Инструменты ресерча для оркестратора (скилл lecture-forge)
+  papersSearch: (a) => searchPapersDirect(a),
+  papersPdf: (a) => {
+    const s = getSettings()
+    return fetchPaperPdfDirect(a, { elsevierKey: s.elsevierKey, elsevierInsttoken: s.elsevierInsttoken, unpaywallEmail: s.unpaywallEmail })
+  },
+  anythingEnsure: async () => {
+    const r = await ensureAnything()
+    return !!r.ok
+  },
+  anythingIngest: (a) => ingestDocument(a.base64, a.name, getSettings().anythingllmKey)
+})
 import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import JSZip from 'jszip'
@@ -526,6 +540,15 @@ ipcMain.handle('anythingllm:ingest', async (_e, args: { base64: string; name: st
   return ingestDocument(args.base64, args.name, key)
 })
 
+// Убрать документ из RAG AnythingLLM (при удалении ноды-статьи с доски).
+ipcMain.handle('anythingllm:remove', async (_e, args: { location: string }) => {
+  const key = getSettings().anythingllmKey
+  if (!key) return { ok: false as const, error: 'нет API-ключа AnythingLLM' }
+  const st = await anyState()
+  if (!st.running) return { ok: false as const, error: 'AnythingLLM не запущен' }
+  return removeDocument(args.location, key)
+})
+
 // --- OpenScience (@synsci/openscience — headless-сервер + webview) ---
 onOpensciProgress((p) => {
   for (const w of BrowserWindow.getAllWindows()) {
@@ -748,19 +771,54 @@ function authHeaders(p: Provider): Record<string, string> {
   return h
 }
 
-// Модели провайдера: сначала ручной список, иначе пробуем /models
-async function providerModels(p: Provider): Promise<string[]> {
-  const manual = p.models.split(',').map((s) => s.trim()).filter(Boolean)
-  if (manual.length) return manual
-  if (!p.baseURL) return []
+// Кэш каталога /models по baseURL (для списка id и цен). TTL 10 мин, чтобы открытие
+// пикера не дёргало API каждый раз.
+const catalogCache = new Map<
+  string,
+  { t: number; ids: string[]; prices: Map<string, { in: number; out: number }> }
+>()
+
+// Каталог провайдера: все id + карта цен (у OpenRouter в /models есть pricing:
+// {prompt, completion} в $/токен; переводим в $/1М токенов). У кого нет — цен нет.
+async function fetchCatalog(p: Provider): Promise<{ ids: string[]; prices: Map<string, { in: number; out: number }> }> {
+  if (!p.baseURL) return { ids: [], prices: new Map() }
+  const cached = catalogCache.get(p.baseURL)
+  if (cached && Date.now() - cached.t < 600000) return { ids: cached.ids, prices: cached.prices }
+  const ids: string[] = []
+  const prices = new Map<string, { in: number; out: number }>()
   try {
     const r = await fetchT(`${p.baseURL}/models`, { headers: authHeaders(p) }, 8000)
-    if (!r.ok) return []
-    const j = (await r.json()) as { data?: Array<{ id: string }> }
-    return (j.data ?? []).map((m) => m.id).slice(0, 60)
+    if (r.ok) {
+      const j = (await r.json()) as {
+        data?: Array<{ id: string; pricing?: { prompt?: string; completion?: string } }>
+      }
+      for (const m of j.data ?? []) {
+        ids.push(m.id)
+        if (m.pricing) {
+          const pin = parseFloat(m.pricing.prompt ?? '') * 1e6
+          const pout = parseFloat(m.pricing.completion ?? '') * 1e6
+          if (Number.isFinite(pin) || Number.isFinite(pout)) prices.set(m.id, { in: pin, out: pout })
+        }
+      }
+    }
   } catch {
-    return []
+    /* ignore */
   }
+  catalogCache.set(p.baseURL, { t: Date.now(), ids, prices })
+  return { ids, prices }
+}
+
+// Модели провайдера: ручной список (иначе /models) + цены, если провайдер их отдаёт.
+async function providerModels(
+  p: Provider
+): Promise<Array<{ id: string; priceIn?: number; priceOut?: number }>> {
+  const cat = await fetchCatalog(p)
+  const manual = p.models.split(',').map((s) => s.trim()).filter(Boolean)
+  const ids = manual.length ? manual : cat.ids.slice(0, 60)
+  return ids.map((id) => {
+    const pr = cat.prices.get(id)
+    return { id, priceIn: pr?.in, priceOut: pr?.out }
+  })
 }
 
 // --- Обработчики ---
@@ -783,8 +841,18 @@ ipcMain.handle('ai:models', async () => {
   // Параллельно — иначе один недоступный провайдер задерживает весь список
   const enabled = getProviders().filter((p) => p.enabled)
   const lists = await Promise.all(enabled.map((p) => providerModels(p)))
+  // Цена → компактная строка ($/1М токенов). Меньше $1 — с двумя знаками.
+  const money = (n: number): string => '$' + (n < 10 ? n.toFixed(2) : n.toFixed(0))
   enabled.forEach((p, i) => {
-    for (const m of lists[i]) out.push({ value: `${p.id}::${m}`, label: m, group: p.name })
+    for (const m of lists[i]) {
+      const hasIn = typeof m.priceIn === 'number' && Number.isFinite(m.priceIn)
+      const hasOut = typeof m.priceOut === 'number' && Number.isFinite(m.priceOut)
+      const price =
+        hasIn || hasOut
+          ? `  ·  вх ${hasIn ? money(m.priceIn!) : '?'} / вых ${hasOut ? money(m.priceOut!) : '?'} за 1М`
+          : ''
+      out.push({ value: `${p.id}::${m.id}`, label: m.id + price, group: p.name })
+    }
   })
   return out
 })
@@ -823,39 +891,63 @@ export async function callModel(args: {
         : m
     )
   }
-  try {
-    const r = await fetchT(
-      `${p.baseURL}/chat/completions`,
-      {
-        method: 'POST',
-        headers: authHeaders(p),
-        body: JSON.stringify({ model: modelId, messages: msgs, stream: false })
-      },
-      args.timeoutMs
-    )
-    if (!r.ok) {
+  // Retry с бэкоффом на rate-limit (429) и 5xx / сетевые сбои. Без него шквал
+  // параллельных вызовов оркестратора ловил 429 и каскадно валил весь прогон.
+  const MAX_ATTEMPTS = 4
+  let lastErr = ''
+  for (let attempt = 0; attempt < MAX_ATTEMPTS; attempt++) {
+    try {
+      const r = await fetchT(
+        `${p.baseURL}/chat/completions`,
+        {
+          method: 'POST',
+          headers: authHeaders(p),
+          body: JSON.stringify({ model: modelId, messages: msgs, stream: false })
+        },
+        args.timeoutMs
+      )
+      if (r.ok) {
+        const j = (await r.json()) as {
+          choices?: Array<{ message?: { content?: string } }>
+          usage?: { total_tokens?: number }
+        }
+        const content = j.choices?.[0]?.message?.content ?? ''
+        const totalTokens = j.usage?.total_tokens ?? 0
+        return { ok: true as const, content, totalTokens }
+      }
+      // 429 (rate limit) или 5xx → повтор с бэкоффом (уважаем Retry-After).
+      if ((r.status === 429 || r.status >= 500) && attempt < MAX_ATTEMPTS - 1) {
+        const ra = Number(r.headers.get('retry-after'))
+        const wait =
+          Number.isFinite(ra) && ra > 0
+            ? Math.min(20000, ra * 1000)
+            : Math.min(12000, 700 * 2 ** attempt) + Math.floor(Math.random() * 500)
+        lastErr = `${p.name}: ${r.status}`
+        await new Promise((res) => setTimeout(res, wait))
+        continue
+      }
       const t = await r.text()
-      return { ok: false as const, error: `${p.name}: ошибка ${r.status}: ${t}` }
-    }
-    const j = (await r.json()) as {
-      choices?: Array<{ message?: { content?: string } }>
-      usage?: { total_tokens?: number }
-    }
-    const content = j.choices?.[0]?.message?.content ?? ''
-    const totalTokens = j.usage?.total_tokens ?? 0
-    return { ok: true as const, content, totalTokens }
-  } catch (e) {
-    const timedOut = e instanceof Error && e.name === 'AbortError'
-    return {
-      ok: false as const,
-      error:
-        p.id === 'lmstudio'
-          ? `Не удалось подключиться к LM Studio (порт 1234 запущен?)${timedOut ? ' — превышено время ожидания' : ''}`
-          : timedOut
-            ? `${p.name}: превышено время ожидания ответа (модель не ответила вовремя).`
-            : `Не удалось подключиться к ${p.name}. Проверь baseURL и ключ в ⚙ Настройках.`
+      return { ok: false as const, error: `${p.name}: ошибка ${r.status}: ${t.slice(0, 200)}` }
+    } catch (e) {
+      const timedOut = e instanceof Error && e.name === 'AbortError'
+      // Сетевой сбой (не таймаут) — можно повторить; таймаут не повторяем (уже долго ждали).
+      if (!timedOut && attempt < MAX_ATTEMPTS - 1) {
+        lastErr = String(e)
+        await new Promise((res) => setTimeout(res, Math.min(12000, 700 * 2 ** attempt)))
+        continue
+      }
+      return {
+        ok: false as const,
+        error:
+          p.id === 'lmstudio'
+            ? `Не удалось подключиться к LM Studio (порт 1234 запущен?)${timedOut ? ' — превышено время ожидания' : ''}`
+            : timedOut
+              ? `${p.name}: превышено время ожидания ответа (модель не ответила вовремя).`
+              : `Не удалось подключиться к ${p.name}. Проверь baseURL и ключ в ⚙ Настройках.`
+      }
     }
   }
+  return { ok: false as const, error: lastErr || `${p.name}: не удалось после ${MAX_ATTEMPTS} попыток` }
 }
 
 // Отправить диалог модели выбранного провайдера

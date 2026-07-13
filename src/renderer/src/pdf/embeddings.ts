@@ -13,6 +13,7 @@ let extractorPromise: Promise<any> | null = null
 export function loadEmbedder(onProgress?: (msg: string) => void): Promise<any> {
   if (!extractorPromise) {
     extractorPromise = pipeline('feature-extraction', 'Xenova/multilingual-e5-small', {
+      // Полная точность fp32 — максимальное качество эмбеддингов (без квантизации).
       dtype: 'fp32',
       device: 'wasm',
       // eslint-disable-next-line @typescript-eslint/no-explicit-any

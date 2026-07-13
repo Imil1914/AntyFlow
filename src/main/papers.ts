@@ -47,13 +47,17 @@ function fromInverted(inv: Record<string, number[]> | null | undefined): string 
 }
 
 async function searchOpenAlex(query: string, limit: number, yearFrom?: number, yearTo?: number): Promise<Paper[]> {
-  const filters: string[] = []
+  // Качество: отсекаем препринты/репозитории (arXiv, CyberLeninka, Zenodo, SSRN) —
+  // оставляем опубликованное в журналах/сборниках; сортируем по цитируемости, чтобы
+  // наверх шли статьи из сильных журналов (Nature, Science, IEEE и т.п.).
+  const filters: string[] = ['primary_location.source.type:!repository']
   if (yearFrom) filters.push(`from_publication_date:${yearFrom}-01-01`)
   if (yearTo) filters.push(`to_publication_date:${yearTo}-12-31`)
   const url =
     'https://api.openalex.org/works?search=' +
     encodeURIComponent(query) +
-    (filters.length ? `&filter=${filters.join(',')}` : '') +
+    `&filter=${filters.join(',')}` +
+    '&sort=cited_by_count:desc' +
     `&per_page=${Math.min(25, limit)}&mailto=flow-app@example.com`
   const r = await ft(url)
   if (!r.ok) return []
@@ -267,6 +271,52 @@ async function testElsevier(keys: Keys): Promise<{
     out.ftMsg = String(e)
   }
   return out
+}
+
+// Прямой вызов поиска (для оркестратора, минуя IPC): OpenAlex с фильтром «хорошие
+// журналы». Слияние/дедуп по граням делает вызывающий (research-фаза).
+export async function searchPapersDirect(args: {
+  query: string
+  limit?: number
+  yearFrom?: number
+  yearTo?: number
+}): Promise<Paper[]> {
+  const q = (args.query || '').trim()
+  if (!q) return []
+  try {
+    return await searchOpenAlex(q, args.limit || 15, args.yearFrom, args.yearTo)
+  } catch {
+    return []
+  }
+}
+
+// Скачать PDF статьи → base64 (для оркестратора): прямой OA-URL, иначе Unpaywall.
+export async function fetchPaperPdfDirect(
+  args: { doi?: string; pdfUrl?: string; source?: string },
+  keys: Keys
+): Promise<{ ok: boolean; base64?: string }> {
+  const doi = cleanDoi(args.doi || '')
+  try {
+    if (args.pdfUrl) {
+      const r = await ft(args.pdfUrl, { headers: { 'User-Agent': 'Mozilla/5.0' } }, 30000)
+      if (r.ok) {
+        const ct = r.headers.get('content-type') || ''
+        const buf = await r.arrayBuffer()
+        if (ct.includes('pdf') || (buf.byteLength > 1000 && new Uint8Array(buf.slice(0, 4)).join(',') === '37,80,68,70'))
+          return { ok: true, base64: Buffer.from(buf).toString('base64') }
+      }
+    }
+    if (doi && keys.unpaywallEmail) {
+      const up = await unpaywallPdf(doi, keys.unpaywallEmail)
+      if (up) {
+        const r = await ft(up, { headers: { 'User-Agent': 'Mozilla/5.0' } }, 30000)
+        if (r.ok) return { ok: true, base64: Buffer.from(await r.arrayBuffer()).toString('base64') }
+      }
+    }
+    return { ok: false }
+  } catch {
+    return { ok: false }
+  }
 }
 
 export function registerPapersIpc(getKeys: () => Keys): void {

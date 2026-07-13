@@ -125,6 +125,16 @@ export function NodeIcon({ kind, size = 15 }: { kind: string; size?: number }) {
           <path d="M3.5 8 A4.5 1.8 0 0 0 12.5 8" />
         </svg>
       )
+    case 'webgpt': // ChatGPT (веб) — облачко чата с точками
+    case 'webgemini': // Gemini (веб)
+    case 'webglm': // GLM (веб)
+      return (
+        <svg {...p}>
+          <circle cx="8" cy="8" r="5.6" />
+          <path d="M2.7 6.4 H13.3 M2.7 9.6 H13.3" />
+          <path d="M8 2.4 C5.6 4.2 5.6 11.8 8 13.6 C10.4 11.8 10.4 4.2 8 2.4 Z" />
+        </svg>
+      )
     case 'notebook': // Jupyter — тетрадь с пружиной
       return (
         <svg {...p}>
@@ -269,6 +279,14 @@ export function GroupIcon({ id, size = 18 }: { id: string; size?: number }): JSX
           <circle cx="6.1" cy="8.2" r="0.95" fill="currentColor" stroke="none" />
           <circle cx="9.9" cy="8.2" r="0.95" fill="currentColor" stroke="none" />
           <line x1="6.6" y1="10.4" x2="9.4" y2="10.4" />
+        </svg>
+      )
+    case 'webchats': // Веб-чаты (логин) — глобус с меридианами
+      return (
+        <svg {...p}>
+          <circle cx="8" cy="8" r="5.6" />
+          <path d="M2.7 6.4 H13.3 M2.7 9.6 H13.3" />
+          <path d="M8 2.4 C5.6 4.2 5.6 11.8 8 13.6 C10.4 11.8 10.4 4.2 8 2.4 Z" />
         </svg>
       )
     default:

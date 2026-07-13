@@ -189,7 +189,14 @@ declare global {
         error: string
       }>
       anythingStop: () => Promise<{ ok: true }>
-      anythingIngest: (args: { base64: string; name: string }) => Promise<{ ok: boolean; error?: string }>
+      anythingIngest: (args: { base64: string; name: string }) => Promise<{ ok: boolean; error?: string; location?: string }>
+      anythingRemove: (args: { location: string }) => Promise<{ ok: boolean; error?: string }>
+      onOrchCreateNodes: (
+        cb: (payload: {
+          projectId: string
+          nodes: Array<{ kind: string; title: string; body?: string; facet?: string; url?: string; meta?: Record<string, unknown> }>
+        }) => void
+      ) => () => void
       onAnythingProgress: (cb: (p: { phase: string; message: string }) => void) => () => void
       openscienceEnsure: (args?: { cwd?: string }) => Promise<{ ok: boolean; url?: string; error?: string }>
       openscienceState: () => Promise<{
@@ -259,7 +266,23 @@ declare global {
         decision: { decision: 'approve' | 'reject' | 'edit'; feedback?: string }
       }) => Promise<{ ok: boolean }>
       orchState: (args: { projectId: string }) => Promise<{ ok: boolean; tree: string | null; log: unknown[] }>
+      orchWebLLMResult: (args: {
+        projectId: string
+        requestId: string
+        ok: boolean
+        text: string
+        provider?: string
+      }) => Promise<{ ok: boolean }>
+      onOrchAskWebLLM: (
+        cb: (m: { projectId: string; requestId: string; prompt: string; target?: string; provider?: string; timeoutMs?: number }) => void
+      ) => () => void
       orchVaultRead: (args: { key: string }) => Promise<{ ok: boolean; content: string | null }>
+      orchRegistry: () => Promise<{
+        ok: boolean
+        default: string
+        roles: Array<{ node_id: string; type: string; model: string }>
+      }>
+      orchRegistrySet: (args: { nodeId: string; model: string }) => Promise<{ ok: boolean; error?: string }>
       onOrchTrace: (cb: (m: { projectId: string; entry: OrchTraceEntry }) => void) => () => void
       onOrchStatus: (cb: (m: OrchStatus) => void) => () => void
       onOrchDone: (cb: (m: { projectId: string; result: OrchResult }) => void) => () => void

@@ -16,6 +16,11 @@ const PLANNER_SYSTEM =
   'recursive — подзадача сама огромная и требует своей декомпозиции), ' +
   'success_criteria (явные проверяемые критерии успеха), size (small|medium|large), ' +
   'и для actor_critic — rubric: массив {criterion, weight}. ' +
+  'ПОРЯДОК КРИТИЧЕН: если пользователь пронумеровал шаги — сохрани их последовательность через deps ' +
+  '(каждый содержательный шаг зависит от предыдущего). Задачи-ИТОГИ — канбан-планы, списки покупок, ' +
+  'финальные заметки, резюме, «подведи итог» — СТАВЬ В КОНЕЦ и делай зависимыми (deps) от ' +
+  'исследовательских/аналитических задач: их НЕЛЬЗЯ выполнять первыми, пока не собрана вся информация. ' +
+  'Не оставляй такие итоговые задачи без deps. ' +
   'Отвечай СТРОГО валидным JSON вида: ' +
   '{"tasks":[{"id":"t1","description":"...","deps":[],"mode":"pipeline","success_criteria":"...","size":"small","rubric":[]}]}. ' +
   'Без пояснений, без markdown-ограждений.'
@@ -30,7 +35,13 @@ type RawTask = {
   rubric?: RubricCriterion[]
 }
 
-export async function plan(rt: Runtime, goal: string, materials: string[], plannerModel: string): Promise<TaskNode[]> {
+export async function plan(
+  rt: Runtime,
+  goal: string,
+  materials: string[],
+  plannerModel: string,
+  augment?: string
+): Promise<TaskNode[]> {
   // Материалы передаём как КЛЮЧИ + краткие выдержки (data-plane: не сырой объём).
   let context = ''
   if (materials.length) {
@@ -43,19 +54,27 @@ export async function plan(rt: Runtime, goal: string, materials: string[], plann
   }
 
   const started = Date.now()
-  const res = await rt.aiChat({
-    model: plannerModel,
-    messages: [
-      { role: 'system', content: PLANNER_SYSTEM },
-      { role: 'user', content: `Проект: ${goal}${context}` }
-    ],
-    timeoutMs: 120000
-  })
+  const messages = [
+    { role: 'system' as const, content: PLANNER_SYSTEM + (augment ? '\n\n' + augment : '') },
+    { role: 'user' as const, content: `Проект: ${goal}${context}` }
+  ]
+  const parseTasks = (content: string): TaskNode[] => {
+    const parsed = extractJson<{ tasks?: RawTask[] }>(content)
+    return parsed?.tasks?.length ? normalize(parsed.tasks) : []
+  }
 
-  let tasks: TaskNode[] = []
-  if (res.ok) {
-    const parsed = extractJson<{ tasks?: RawTask[] }>(res.content)
-    if (parsed?.tasks?.length) tasks = normalize(parsed.tasks)
+  let res = await rt.aiChat({ model: plannerModel, messages, timeoutMs: 120000 })
+  let tasks: TaskNode[] = res.ok ? parseTasks(res.content) : []
+
+  // Модель ноды не ответила или не дала валидное разбиение → повторяем на модели по
+  // умолчанию (model:'' → defaultModel). Иначе одна мёртвая модель ноды (напр. с
+  // невалидным ключом) схлопывала весь план в одну fallback-задачу.
+  if (!tasks.length) {
+    const retry = await rt.aiChat({ model: '', messages, timeoutMs: 120000 })
+    if (retry.ok) {
+      res = retry
+      tasks = parseTasks(retry.content)
+    }
   }
   if (!tasks.length) tasks = fallback(goal)
 

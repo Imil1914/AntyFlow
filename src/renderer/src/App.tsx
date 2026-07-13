@@ -11,8 +11,8 @@ import {
   type TLComponents
 } from 'tldraw'
 import { useSync } from '@tldraw/sync'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { FlowArrowShapeUtil, FlowNodeShapeUtil, NodeFullscreenOverlay, sheetModelFromFile, type FlowNodeShape } from './shapes/FlowNodeShapeUtil'
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
+import { FlowArrowShapeUtil, FlowNodeShapeUtil, NodeFullscreenOverlay, sheetModelFromFile, webLLMRegistry, type FlowNodeShape } from './shapes/FlowNodeShapeUtil'
 import { DESIGN_CSS } from './slides/design'
 import SlideEditor from './slides/SlideEditor'
 import { OS_CSS, themeVars, THEME_ORDER, THEME_SWATCH, type ThemeName } from './os/theme'
@@ -33,6 +33,13 @@ import { VaultView } from './vault/VaultView'
 
 const customShapeUtils = [FlowNodeShapeUtil, FlowArrowShapeUtil]
 
+// Управление камерой, удобное и для мыши, и для тачпада (как в Figma/Miro):
+//  • прокрутка / два пальца по тачпаду — панорама холста;
+//  • щипок (pinch) на тачпаде или Ctrl+колесо — зум;
+//  • панель ⊖ % ⊕ ⤢ в статус-баре — зум и «вписать» для тех, у кого нет жестов.
+// (раньше было wheelBehavior:'zoom' — на тачпаде прокрутка дёргано зумила).
+const CAMERA_OPTIONS = { wheelBehavior: 'pan' as const, panSpeed: 1, zoomSpeed: 1 }
+
 // Общая доска в режиме real-time: стор берём с sync-сервера (useSync), а не из
 // локального IndexedDB. Курсоры и правки других участников — из коробки.
 function SharedBoard({
@@ -50,10 +57,77 @@ function SharedBoard({
       store={store}
       shapeUtils={customShapeUtils}
       components={components}
-      cameraOptions={{ wheelBehavior: 'zoom' }}
+      cameraOptions={CAMERA_OPTIONS}
       onMount={onMount}
     />
   )
+}
+
+// Оркестратор (research-фаза скилла lecture-forge) просит создать ноды на доске.
+// Раскладываем кластерами по граням: каждая грань — свой столбец, узлы стопкой.
+type OrchNodeSpec = {
+  kind: string
+  title: string
+  body?: string
+  facet?: string
+  url?: string
+  meta?: Record<string, unknown>
+}
+function createOrchNodes(editor: Editor, nodes: OrchNodeSpec[]): void {
+  if (!nodes?.length) return
+  const vb = editor.getViewportPageBounds()
+  const startX = vb.x + 60
+  const startY = vb.y + 60
+  const COL_W = 380
+  const GAP_X = 60
+  const GAP_Y = 28
+  const byFacet = new Map<string, OrchNodeSpec[]>()
+  for (const n of nodes) {
+    const f = n.facet || 'Прочее'
+    if (!byFacet.has(f)) byFacet.set(f, [])
+    byFacet.get(f)!.push(n)
+  }
+  const created: ReturnType<typeof createShapeId>[] = []
+  let col = 0
+  for (const [facet, items] of byFacet) {
+    const x = startX + col * (COL_W + GAP_X)
+    let y = startY
+    // Заголовок грани
+    const hid = createShapeId()
+    editor.createShape<FlowNodeShape>({
+      id: hid,
+      type: 'flow-node',
+      x,
+      y,
+      props: { kind: 'note', title: `🗂 ${facet}`, body: '', w: COL_W, h: 60 }
+    })
+    created.push(hid)
+    y += 60 + GAP_Y
+    for (const n of items) {
+      const id = createShapeId()
+      const icon = n.kind === 'paper' ? '📄 ' : n.kind === 'hypothesis' ? '💡 ' : n.kind === 'kanban' ? '📋 ' : ''
+      const title = (icon + (n.title || '')).slice(0, 100)
+      let body = n.body || ''
+      if (n.url) body += `${body ? '\n\n' : ''}[${n.url}](${n.url})`
+      const h = n.kind === 'paper' ? 190 : n.kind === 'kanban' ? 420 : 260
+      editor.createShape<FlowNodeShape>({
+        id,
+        type: 'flow-node',
+        x,
+        y,
+        props: { kind: 'note', title, body, w: COL_W, h }
+      })
+      created.push(id)
+      y += h + GAP_Y
+    }
+    col++
+  }
+  try {
+    if (created.length) editor.select(...created)
+    editor.zoomToFit({ animation: { duration: 300 } })
+  } catch {
+    /* ignore */
+  }
 }
 
 const SANS = "'IBM Plex Sans', -apple-system, 'Segoe UI', system-ui, sans-serif"
@@ -153,6 +227,9 @@ const SIDEBAR_CHIPS = [
   { kind: 'anythingllm', title: 'AnythingLLM', label: 'AL', color: 'var(--c-chat)' },
   { kind: 'openscience', title: 'OpenScience', label: 'OS', color: 'var(--c-chat)' },
   { kind: 'notebook', title: 'Jupyter-ноутбук', label: 'Jp', color: 'var(--c-code)' },
+  { kind: 'webgpt', title: 'ChatGPT (веб-логин)', label: 'GP', color: 'var(--c-chat)' },
+  { kind: 'webgemini', title: 'Gemini (веб-логин)', label: 'Gm', color: 'var(--c-chat)' },
+  { kind: 'webglm', title: 'GLM (веб-логин)', label: 'GL', color: 'var(--c-chat)' },
   { kind: 'orchestrator', title: 'Оркестратор', label: '🕸', color: 'var(--c-img)' }
 ]
 
@@ -162,7 +239,8 @@ const NODE_GROUPS: Array<{ id: string; title: string; subtitle: string; icon: st
   { id: 'docs', title: 'Документы и текст', subtitle: 'Документы, таблицы, списки, канбан, бэклог, схемы и презентации', icon: 'doc', kinds: ['list', 'kanban', 'board', 'doc', 'sheet', 'diagram', 'deck'] },
   { id: 'code', title: 'Код и данные', subtitle: 'Python-код и Jupyter-ноутбук', icon: 'code', kinds: ['code', 'notebook'] },
   { id: 'media', title: 'Медиа', subtitle: 'Генерация картинок и референсы', icon: 'image', kinds: ['image', 'ref'] },
-  { id: 'agents', title: 'ИИ-агенты', subtitle: 'OpenCode, OpenScience, AnythingLLM', icon: 'opencode', kinds: ['opencode', 'openscience', 'anythingllm'] }
+  { id: 'agents', title: 'ИИ-агенты', subtitle: 'OpenCode, OpenScience, AnythingLLM', icon: 'opencode', kinds: ['opencode', 'openscience', 'anythingllm'] },
+  { id: 'webchats', title: 'Веб-чаты (логин)', subtitle: 'ChatGPT, Gemini, GLM — вход своим аккаунтом в webview', icon: 'ai', kinds: ['webgpt', 'webgemini', 'webglm'] }
 ]
 // Ноды-одиночки (без группы) — прямой чип в сайдбаре.
 const STANDALONE_NODES = ['orchestrator']
@@ -403,6 +481,17 @@ function StatusBar({
 }) {
   const zoom = useValue('zoom', () => (editor ? editor.getZoomLevel() : 1), [editor])
   const sep = <span style={{ width: 1, height: 12, background: 'var(--border)' }} />
+  const zbtn: CSSProperties = {
+    minWidth: 18,
+    height: 18,
+    borderRadius: 5,
+    padding: '0 5px',
+    font: `600 12px ${MONO}`,
+    lineHeight: '16px',
+    display: 'inline-flex',
+    alignItems: 'center',
+    justifyContent: 'center'
+  }
 
   // Реальные данные: модель по умолчанию, GPU-память, статус сервисов/провайдеров.
   const [model, setModel] = useState('')
@@ -432,26 +521,44 @@ function StatusBar({
     }
     const poll = async () => {
       try {
-        const g = await window.flow.sysGpu()
-        if (alive) setGpu(g.ok ? g : null)
-      } catch {
-        if (alive) setGpu(null)
-      }
-      try {
         const st = await window.flow.servicesStatus()
         if (alive) setSvc(st)
       } catch {
         /* ignore */
       }
     }
+    // GPU опрашивается через nvidia-smi (запуск процесса). Делаем это редко, а если
+    // NVIDIA нет (первый вызов не удался) — прекращаем совсем, чтобы не спавнить
+    // процесс каждые несколько секунд (это давало периодические подлагивания).
+    let gpuDead = false
+    const pollGpu = async () => {
+      if (gpuDead) return
+      try {
+        const g = await window.flow.sysGpu()
+        if (!alive) return
+        if (g.ok) setGpu(g)
+        else {
+          setGpu(null)
+          gpuDead = true
+        }
+      } catch {
+        if (alive) {
+          setGpu(null)
+          gpuDead = true
+        }
+      }
+    }
     loadModel()
     poll()
-    const t1 = setInterval(poll, 5000)
-    const t2 = setInterval(loadModel, 8000)
+    pollGpu()
+    const t1 = setInterval(poll, 8000)
+    const t2 = setInterval(loadModel, 15000)
+    const t3 = setInterval(pollGpu, 20000)
     return () => {
       alive = false
       clearInterval(t1)
       clearInterval(t2)
+      clearInterval(t3)
     }
   }, [])
 
@@ -530,7 +637,28 @@ function StatusBar({
         </>
       )}
       <div style={{ flex: 1 }} />
-      <span>{Math.round(zoom * 100)}%</span>
+      <span
+        style={{ display: 'flex', alignItems: 'center', gap: 3 }}
+        title="Зум. Тачпад: щипок двумя пальцами или Ctrl+прокрутка. Прокрутка/два пальца — панорама."
+      >
+        <button className="os-btn" title="Отдалить" onClick={() => editor?.zoomOut()} style={zbtn}>
+          −
+        </button>
+        <button
+          className="os-btn"
+          title="Сбросить зум (100%)"
+          onClick={() => editor?.resetZoom()}
+          style={{ ...zbtn, minWidth: 42, fontVariantNumeric: 'tabular-nums' }}
+        >
+          {Math.round(zoom * 100)}%
+        </button>
+        <button className="os-btn" title="Приблизить" onClick={() => editor?.zoomIn()} style={zbtn}>
+          +
+        </button>
+        <button className="os-btn" title="Вписать всё на экран" onClick={() => editor?.zoomToFit()} style={zbtn}>
+          ⤢
+        </button>
+      </span>
       {sep}
       <span style={{ display: 'flex', alignItems: 'center', gap: 5 }}>
         тема
@@ -1040,7 +1168,9 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 // Размеры новой ноды по типу
 function sizeFor(kind: string): { w: number; h: number } {
   const h =
-    kind === 'orchestrator'
+    kind === 'ai'
+      ? 480
+      : kind === 'orchestrator'
       ? 620
       : kind === 'notebook'
       ? 600
@@ -1058,6 +1188,8 @@ function sizeFor(kind: string): { w: number; h: number } {
       ? 460
       : kind === 'anythingllm'
       ? 460
+      : kind === 'webgpt' || kind === 'webgemini' || kind === 'webglm'
+      ? 620
       : kind === 'diagram'
       ? 380
       : kind === 'ai' || kind === 'search' || kind === 'image' || kind === 'deck' || kind === 'opencode' || kind === 'list'
@@ -1066,7 +1198,9 @@ function sizeFor(kind: string): { w: number; h: number } {
           ? 240
           : 180
   const w =
-    kind === 'orchestrator'
+    kind === 'ai'
+      ? 440
+      : kind === 'orchestrator'
       ? 460
       : kind === 'notebook'
       ? 640
@@ -1079,6 +1213,8 @@ function sizeFor(kind: string): { w: number; h: number } {
       : kind === 'sheet'
       ? 620
       : kind === 'openscience'
+      ? 560
+      : kind === 'webgpt' || kind === 'webgemini' || kind === 'webglm'
       ? 560
       : kind === 'pdf'
       ? 480
@@ -1219,9 +1355,44 @@ export default function App() {
       }
       try {
         ed.sideEffects.registerAfterDeleteHandler('shape', (rec) => {
-          const r = rec as unknown as { type?: string; id?: string; props?: { kind?: string } }
-          if (r?.type === 'flow-node' && r?.props?.kind === 'codeblock' && r.id) {
+          const r = rec as unknown as { type?: string; id?: string; props?: { kind?: string; extra?: string } }
+          if (r?.type !== 'flow-node') return
+          const kind = r.props?.kind
+          // Нода с кодом — гасим процесс.
+          if (kind === 'codeblock' && r.id) {
             window.flow?.killCode({ id: r.id })
+            return
+          }
+          // PDF-нода — авто-очистка RAG: локальный индекс (pdfId) и документ в
+          // AnythingLLM (anyDoc). Но не трогаем, если ту же статью держит другая нода.
+          if (kind === 'pdf') {
+            let ex: { pdfId?: string; anyDoc?: string } = {}
+            try {
+              ex = JSON.parse(r.props?.extra || '{}')
+            } catch {
+              /* ignore */
+            }
+            if (!ex.pdfId && !ex.anyDoc) return
+            let sharedPdf = false
+            let sharedDoc = false
+            try {
+              for (const s of ed.getCurrentPageShapes()) {
+                const sp = s as unknown as { type?: string; props?: { extra?: string } }
+                if (sp.type !== 'flow-node') continue
+                let e2: { pdfId?: string; anyDoc?: string } = {}
+                try {
+                  e2 = JSON.parse(sp.props?.extra || '{}')
+                } catch {
+                  /* ignore */
+                }
+                if (ex.pdfId && e2.pdfId === ex.pdfId) sharedPdf = true
+                if (ex.anyDoc && e2.anyDoc === ex.anyDoc) sharedDoc = true
+              }
+            } catch {
+              /* ignore */
+            }
+            if (ex.pdfId && !sharedPdf) window.flow?.pdfDelete?.({ id: ex.pdfId })
+            if (ex.anyDoc && !sharedDoc) window.flow?.anythingRemove?.({ location: ex.anyDoc })
           }
         })
       } catch {
@@ -1239,6 +1410,43 @@ export default function App() {
     },
     [pullCanvas, scheduleSaveCanvas]
   )
+
+  // Оркестратор (research-фаза) просит выложить статьи/гипотезы нодами на доску.
+  useEffect(() => {
+    if (!editor) return
+    const off = window.flow?.onOrchCreateNodes?.((payload) => {
+      try {
+        createOrchNodes(editor, payload.nodes as OrchNodeSpec[])
+      } catch {
+        /* не критично */
+      }
+    })
+    return off
+  }, [editor])
+
+  // Оркестратор просит вписать запрос в веб-чат-ноду (ChatGPT/Gemini/GLM) и вернуть ответ.
+  // Цель: явный target по id → provider (kind) → любая открытая веб-чат-нода.
+  useEffect(() => {
+    const off = window.flow?.onOrchAskWebLLM?.(async (m) => {
+      const respond = (ok: boolean, text: string, provider?: string): void => {
+        window.flow?.orchWebLLMResult?.({ projectId: m.projectId, requestId: m.requestId, ok, text, provider })
+      }
+      try {
+        let driver = m.target ? webLLMRegistry.get(m.target) : undefined
+        if (!driver && m.provider) {
+          const name = m.provider === 'webgemini' ? 'Gemini' : m.provider === 'webglm' ? 'GLM' : 'ChatGPT'
+          for (const d of webLLMRegistry.values()) if (d.provider === name) { driver = d; break }
+        }
+        if (!driver) driver = [...webLLMRegistry.values()][0]
+        if (!driver) return respond(false, '')
+        const text = await driver.ask(m.prompt, m.timeoutMs)
+        respond(!!text, text || '', driver.provider)
+      } catch (e) {
+        respond(false, String((e as Error)?.message || e))
+      }
+    })
+    return off
+  }, [])
 
   // Список досок: при старте подтянуть из файла (если он новее), дальше — писать при изменениях.
   useEffect(() => {
@@ -1973,7 +2181,7 @@ export default function App() {
               persistenceKey={board.key}
               shapeUtils={customShapeUtils}
               components={components}
-              cameraOptions={{ wheelBehavior: 'zoom' }}
+              cameraOptions={CAMERA_OPTIONS}
               onMount={(ed) => handleMount(ed, board)}
             />
           )}

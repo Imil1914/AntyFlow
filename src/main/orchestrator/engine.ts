@@ -5,6 +5,8 @@
 // ============================================================================
 import type { Runtime, TaskNode, TaskResult, Budget, ControlPlaneCommand, ExecutionMode, TaskStatus } from './contracts'
 import { plan } from './planner'
+import { researchPhase } from './research'
+import { assembleLecture, LECTURE_FORGE_PLAYBOOK } from './lecture'
 import { selectMode } from './modeSelector'
 import { withTimeout, shortSummary } from './util'
 import type { ModeContext, ModeFn } from './modes/common'
@@ -36,8 +38,65 @@ export async function orchestrate(rt: Runtime, opts: OrchestrateOpts): Promise<T
   const branch = opts.branch || ''
   rt.status({ task_id: 'root', status: 'running', summary: opts.goal })
 
-  // --- Планирование ---
-  const tasks = await plan(rt, opts.goal, materials, plannerModel)
+  // --- Research-фаза (скилл lecture-forge, шаг 1) ---
+  // Только на корне (не в саб-оркестраторах) и только для научных тем: собирает
+  // статьи на доску + в AnythingLLM + гипотезы, обогащает materials для планировщика.
+  let allMaterials = materials
+  let scientific = false
+  if (depth === 0) {
+    try {
+      const research = await researchPhase(rt, opts.goal)
+      scientific = research.scientific
+      if (research.materials.length) allMaterials = [...materials, ...research.materials]
+    } catch (e) {
+      rt.trace({
+        command_id: rt.newId('cmd'),
+        task_id: '__research__',
+        node_id: 'role:researcher',
+        mode: 'system',
+        input_refs: [],
+        output_ref: '',
+        cost: { tokens: 0, calls: 0 },
+        duration_ms: 0,
+        timestamp: Date.now(),
+        note: `Ресерч-фаза упала (не критично): ${(e as Error).message}`
+      })
+    }
+  }
+
+  // --- Веб-консультация (опционально) ---
+  // Если на холсте открыта веб-чат-нода (ChatGPT/Gemini/GLM с логином), оркестратор
+  // задаёт ей вопрос по цели и кладёт ответ отдельной нодой + в materials. Если веб-чата
+  // нет — rt.webLLMAsk вернёт ok:false, и фаза молча пропускается (не роняет прогон).
+  if (depth === 0 && !rt.isCancelled()) {
+    try {
+      const wl = await rt.webLLMAsk({
+        prompt:
+          `Тема проекта: ${opts.goal}\n\n` +
+          'Дай развёрнутый экспертный разбор темы: ключевые аспекты, подходы, риски и практические рекомендации. ' +
+          'Структурируй ответ по пунктам.',
+        timeoutMs: 180000
+      })
+      if (wl.ok && wl.text.trim()) {
+        await rt.boardCreateNodes([
+          {
+            kind: 'note',
+            title: `Ответ веб-чата${wl.provider ? ` (${wl.provider})` : ''}`,
+            body: wl.text.slice(0, 12000),
+            facet: 'Веб-чат'
+          }
+        ])
+        const wlKey = await rt.vaultWrite(`project:${rt.projectId}/webllm`, wl.text, { kind: 'materials' })
+        allMaterials = [...allMaterials, wlKey]
+        rt.status({ task_id: '__webllm__', status: 'success', summary: `Веб-чат${wl.provider ? ` ${wl.provider}` : ''}: ответ получен` })
+      }
+    } catch {
+      /* веб-консультация не критична */
+    }
+  }
+
+  // --- Планирование (научным темам подмешиваем плейбук lecture-forge) ---
+  const tasks = await plan(rt, opts.goal, allMaterials, plannerModel, scientific ? LECTURE_FORGE_PLAYBOOK : undefined)
   // Префикс ветки: делает task_id глобально уникальными в проекте, чтобы статусы/
   // трейсы саб-оркестратора не привязывались к одноимённым узлам родителя.
   if (branch) {
@@ -78,7 +137,7 @@ export async function orchestrate(rt: Runtime, opts: OrchestrateOpts): Promise<T
     rt.status({ task_id: t.id, status: 'running' })
     // context_refs: материалы — узлам-входам (без зависимостей); иначе выводы зависимостей.
     const contextRefs: string[] = []
-    if (t.deps.length === 0) contextRefs.push(...materials)
+    if (t.deps.length === 0) contextRefs.push(...allMaterials)
     for (const d of t.deps) {
       const r = results.get(d)
       if (r?.output_vault_key) contextRefs.push(r.output_vault_key)
@@ -183,6 +242,19 @@ export async function orchestrate(rt: Runtime, opts: OrchestrateOpts): Promise<T
     }
   }
   await Promise.allSettled(inflight.values())
+
+  // --- Сборка финальной лекции (скилл lecture-forge, стадия 5), для научных тем ---
+  if (scientific && !rt.isCancelled()) {
+    try {
+      const doneResults = [...results.values()].filter((r) => r.status === 'success' || r.status === 'partial')
+      const outKeys = doneResults.map((r) => r.output_vault_key).filter(Boolean)
+      const outMap = outKeys.length ? await rt.vaultReadMany(outKeys) : {}
+      const summaries = doneResults.map((r) => outMap[r.output_vault_key] || r.summary)
+      await assembleLecture(rt, opts.goal, allMaterials, summaries)
+    } catch (e) {
+      rt.status({ task_id: '__lecture__', status: 'failure', summary: 'сборка лекции упала: ' + (e as Error).message })
+    }
+  }
 
   return aggregate(rt, tasks, results, opts.goal)
 }

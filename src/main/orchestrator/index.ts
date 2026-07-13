@@ -18,7 +18,7 @@ import {
   vaultReadLog,
   vaultEvict
 } from './vault'
-import { findCandidates } from './registry'
+import { findCandidates, getRegistry, upsertNode } from './registry'
 import { BudgetManager, deriveSubBudget } from './budget'
 import {
   DEFAULT_BUDGET,
@@ -27,7 +27,8 @@ import {
   type WorkerToMain,
   type MainToWorker,
   type WorkerData,
-  type HumanDecision
+  type HumanDecision,
+  type PaperLite
 } from './contracts'
 
 type Deps = {
@@ -38,6 +39,11 @@ type Deps = {
     timeoutMs?: number
   }) => Promise<{ ok: true; content: string; totalTokens: number } | { ok: false; error: string }>
   getDefaultModel: () => string
+  // Инструменты ресерча (скилл lecture-forge)
+  papersSearch: (args: { query: string; yearFrom?: number; yearTo?: number; limit?: number }) => Promise<PaperLite[]>
+  papersPdf: (args: { doi?: string; pdfUrl?: string; source?: string }) => Promise<{ ok: boolean; base64?: string }>
+  anythingEnsure: () => Promise<boolean>
+  anythingIngest: (args: { base64: string; name: string }) => Promise<{ ok: boolean; location?: string }>
 }
 
 // Значения cancelBuf[0]: 0 — работаем, 1 — отмена пользователем, 2 — стоп по бюджету
@@ -48,6 +54,8 @@ type RunState = {
   cancelBuf: SharedArrayBuffer
   workers: Set<Worker>
   humanResolvers: Map<string, (d: HumanDecision) => void>
+  // Ожидающие ответа веб-чата (мост в renderer → webview → обратно).
+  webLLMResolvers: Map<string, (res: { ok: boolean; text: string; provider?: string }) => void>
   subCounter: number // для уникальных branch-префиксов саб-оркестраторов
   finished: boolean
 }
@@ -192,6 +200,55 @@ async function handleWorkerMessage(
     case 'findCandidates':
       reply({ t: 'findCandidatesRes', reqId: msg.reqId, entries: findCandidates(msg.req, deps.getDefaultModel()) })
       return
+    case 'papersSearch': {
+      const papers = await deps.papersSearch(msg.args).catch(() => [] as PaperLite[])
+      reply({ t: 'papersSearchRes', reqId: msg.reqId, papers })
+      return
+    }
+    case 'papersPdf': {
+      const res = await deps.papersPdf(msg.args).catch(() => ({ ok: false }))
+      reply({ t: 'papersPdfRes', reqId: msg.reqId, res })
+      return
+    }
+    case 'anythingEnsure': {
+      const running = await deps.anythingEnsure().catch(() => false)
+      reply({ t: 'anythingEnsureRes', reqId: msg.reqId, running })
+      return
+    }
+    case 'anythingIngest': {
+      const res = await deps.anythingIngest(msg.args).catch(() => ({ ok: false }))
+      reply({ t: 'anythingIngestRes', reqId: msg.reqId, res })
+      return
+    }
+    case 'boardCreateNodes':
+      // Мост в рендерер: он создаёт tldraw-ноды на активной доске.
+      send(run, 'orch:createNodes', { projectId: run.projectId, nodes: msg.nodes })
+      reply({ t: 'boardCreateNodesRes', reqId: msg.reqId })
+      return
+    case 'webLLMAsk': {
+      // Мост в рендерер: он вписывает запрос в веб-чат-ноду (webview) и возвращает
+      // ответ. Резолвер висит здесь до 'orch:webLLMResult' или таймаута.
+      const request_id = `wl_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`
+      const timeoutMs = Math.min(Math.max(msg.timeoutMs || 180000, 15000), 600000)
+      let settled = false
+      const finish = (res: { ok: boolean; text: string; provider?: string }): void => {
+        if (settled) return
+        settled = true
+        run.webLLMResolvers.delete(request_id)
+        reply({ t: 'webLLMAskRes', reqId: msg.reqId, res })
+      }
+      run.webLLMResolvers.set(request_id, finish)
+      setTimeout(() => finish({ ok: false, text: '' }), timeoutMs + 5000)
+      send(run, 'orch:askWebLLM', {
+        projectId: run.projectId,
+        requestId: request_id,
+        prompt: msg.prompt,
+        target: msg.target,
+        provider: msg.provider,
+        timeoutMs
+      })
+      return
+    }
     case 'trace':
       vaultAppendLog(run.projectId, msg.entry.task_id, { kind: 'trace', ...msg.entry })
       send(run, 'orch:trace', { projectId: run.projectId, entry: msg.entry })
@@ -291,6 +348,7 @@ export function registerOrchestratorIpc(d: Deps): void {
         cancelBuf,
         workers: new Set(),
         humanResolvers: new Map(),
+        webLLMResolvers: new Map(),
         subCounter: 0,
         finished: false
       }
@@ -335,12 +393,29 @@ export function registerOrchestratorIpc(d: Deps): void {
     // Разблокируем зависшие human-запросы отказом
     for (const resolve of run.humanResolvers.values()) resolve({ decision: 'reject' })
     run.humanResolvers.clear()
+    // И зависшие веб-чат-запросы — пустым ответом
+    for (const resolve of run.webLLMResolvers.values()) resolve({ ok: false, text: '' })
+    run.webLLMResolvers.clear()
     // Даём воркерам мягко завершиться, затем принудительно
     setTimeout(() => {
       for (const w of run.workers) w.terminate().catch(() => {})
     }, 1500)
     return { ok: true }
   })
+
+  // Ответ веб-чата из renderer → разблокирует висящий webLLMAsk воркера.
+  ipcMain.handle(
+    'orch:webLLMResult',
+    (_e, args: { projectId: string; requestId: string; ok: boolean; text: string; provider?: string }) => {
+      const run = runs.get(args.projectId)
+      const resolve = run?.webLLMResolvers.get(args.requestId)
+      if (run && resolve) {
+        resolve({ ok: args.ok, text: args.text || '', provider: args.provider })
+        return { ok: true }
+      }
+      return { ok: false }
+    }
+  )
 
   ipcMain.handle('orch:humanDecision', (_e, args: { projectId: string; requestId: string; decision: HumanDecision }) => {
     const run = runs.get(args.projectId)
@@ -364,6 +439,26 @@ export function registerOrchestratorIpc(d: Deps): void {
       tree: vaultRead(treeKey),
       log: vaultReadLog(args.projectId)
     }
+  })
+
+  // Реестр ролей: какие модели у под-агентов. Пустая model у роли = «модель по
+  // умолчанию» (getRegistry подставит текущую дефолтную при возврате).
+  ipcMain.handle('orch:registry', () => {
+    const def = deps.getDefaultModel()
+    const roles = getRegistry(def).map((r) => ({
+      node_id: r.node_id,
+      type: r.type,
+      model: r.model // уже с подстановкой дефолта для пустых
+    }))
+    return { ok: true as const, default: def, roles }
+  })
+  // Назначить модель роли. model === '' → сбросить на модель по умолчанию.
+  ipcMain.handle('orch:registrySet', (_e, args: { nodeId: string; model: string }) => {
+    const def = deps.getDefaultModel()
+    const entry = getRegistry(def).find((r) => r.node_id === args.nodeId)
+    if (!entry) return { ok: false as const, error: 'роль не найдена' }
+    upsertNode({ ...entry, model: args.model || '' })
+    return { ok: true as const }
   })
 }
 

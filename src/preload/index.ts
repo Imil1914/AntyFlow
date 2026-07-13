@@ -95,6 +95,15 @@ const api = {
   anythingState: () => ipcRenderer.invoke('anythingllm:state'),
   anythingStop: () => ipcRenderer.invoke('anythingllm:stop'),
   anythingIngest: (args: { base64: string; name: string }) => ipcRenderer.invoke('anythingllm:ingest', args),
+  anythingRemove: (args: { location: string }) => ipcRenderer.invoke('anythingllm:remove', args),
+  // Оркестратор просит создать ноды на доске (research-фаза скилла lecture-forge)
+  onOrchCreateNodes: (
+    cb: (payload: { projectId: string; nodes: Array<Record<string, unknown>> }) => void
+  ) => {
+    const h = (_e: unknown, p: { projectId: string; nodes: Array<Record<string, unknown>> }): void => cb(p)
+    ipcRenderer.on('orch:createNodes', h)
+    return () => ipcRenderer.removeListener('orch:createNodes', h)
+  },
   onAnythingProgress: (cb: (p: { phase: string; message: string }) => void) => {
     const h = (_e: unknown, p: { phase: string; message: string }) => cb(p)
     ipcRenderer.on('anythingllm:progress', h)
@@ -166,7 +175,20 @@ const api = {
     decision: { decision: 'approve' | 'reject' | 'edit'; feedback?: string }
   }) => ipcRenderer.invoke('orch:humanDecision', args),
   orchState: (args: { projectId: string }) => ipcRenderer.invoke('orch:state', args),
+  // Ответ веб-чата обратно оркестратору (разблокирует его webLLMAsk)
+  orchWebLLMResult: (args: { projectId: string; requestId: string; ok: boolean; text: string; provider?: string }) =>
+    ipcRenderer.invoke('orch:webLLMResult', args),
+  // Оркестратор просит вписать запрос в веб-чат-ноду и вернуть ответ
+  onOrchAskWebLLM: (
+    cb: (m: { projectId: string; requestId: string; prompt: string; target?: string; provider?: string; timeoutMs?: number }) => void
+  ) => {
+    const h = (_e: unknown, m: Parameters<typeof cb>[0]) => cb(m)
+    ipcRenderer.on('orch:askWebLLM', h)
+    return () => ipcRenderer.removeListener('orch:askWebLLM', h)
+  },
   orchVaultRead: (args: { key: string }) => ipcRenderer.invoke('orch:vaultRead', args),
+  orchRegistry: () => ipcRenderer.invoke('orch:registry'),
+  orchRegistrySet: (args: { nodeId: string; model: string }) => ipcRenderer.invoke('orch:registrySet', args),
   onOrchTrace: (cb: (m: { projectId: string; entry: unknown }) => void) => {
     const h = (_e: unknown, m: { projectId: string; entry: unknown }) => cb(m)
     ipcRenderer.on('orch:trace', h)

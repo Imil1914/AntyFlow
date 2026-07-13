@@ -128,6 +128,36 @@ const rt: Runtime = {
               issues: ['spawnSub failed']
             }
     ),
+  papersSearch: (args) =>
+    request(
+      (reqId) => ({ t: 'papersSearch', reqId, args }),
+      (m) => (m.t === 'papersSearchRes' ? m.papers : [])
+    ),
+  papersPdf: (args) =>
+    request(
+      (reqId) => ({ t: 'papersPdf', reqId, args }),
+      (m) => (m.t === 'papersPdfRes' ? m.res : { ok: false })
+    ),
+  anythingEnsure: () =>
+    request(
+      (reqId) => ({ t: 'anythingEnsure', reqId }),
+      (m) => (m.t === 'anythingEnsureRes' ? m.running : false)
+    ),
+  anythingIngest: (args) =>
+    request(
+      (reqId) => ({ t: 'anythingIngest', reqId, args }),
+      (m) => (m.t === 'anythingIngestRes' ? m.res : { ok: false })
+    ),
+  boardCreateNodes: (nodes) =>
+    request(
+      (reqId) => ({ t: 'boardCreateNodes', reqId, nodes }),
+      () => undefined
+    ),
+  webLLMAsk: (args) =>
+    request(
+      (reqId) => ({ t: 'webLLMAsk', reqId, prompt: args.prompt, target: args.target, provider: args.provider, timeoutMs: args.timeoutMs }),
+      (m) => (m.t === 'webLLMAskRes' ? m.res : { ok: false, text: '' })
+    ),
   isCancelled: () => Atomics.load(cancelView, 0) !== 0,
   newId
 }

@@ -8,7 +8,9 @@ import type { TaskResult, RubricCriterion } from '../contracts'
 import { type ModeContext, loadContext, callRole, writeOutput, mkResult, traceCall, pick } from './common'
 import { extractJson } from '../util'
 
-const THRESHOLD = 0.75
+// Реалистичный порог: критик почти не ставил 0.75, поэтому Actor-Critic крутил все
+// итерации впустую и жёг токены. 0.6 = «достаточно хорошо», конвергирует за 2–3 круга.
+const THRESHOLD = 0.6
 
 type CriticVerdict = {
   scores?: Array<{ criterion: string; score: number }>

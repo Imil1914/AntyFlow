@@ -23,7 +23,7 @@ export async function ingestDocument(
   name: string,
   apiKey: string,
   workspaceName = 'Flow'
-): Promise<{ ok: boolean; error?: string }> {
+): Promise<{ ok: boolean; error?: string; location?: string }> {
   if (!apiKey) return { ok: false, error: 'нет API-ключа AnythingLLM (⚙ Настройки)' }
   const base = `http://localhost:${ANY_PORT}/api/v1`
   const H: Record<string, string> = { Authorization: `Bearer ${apiKey}` }
@@ -89,6 +89,45 @@ export async function ingestDocument(
       body: JSON.stringify({ adds: [loc] })
     })
     if (!emR.ok) return { ok: false, error: `AnythingLLM embed ${emR.status}` }
+    return { ok: true, location: String(loc) }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
+// Убрать документ из RAG: снять эмбеддинги из workspace и удалить исходник из системы.
+// location — то, что вернул ingestDocument (напр. "custom-documents/файл-uuid.json").
+export async function removeDocument(
+  location: string,
+  apiKey: string,
+  workspaceName = 'Flow'
+): Promise<{ ok: boolean; error?: string }> {
+  if (!apiKey) return { ok: false, error: 'нет API-ключа AnythingLLM' }
+  if (!location) return { ok: true }
+  const base = `http://localhost:${ANY_PORT}/api/v1`
+  const H: Record<string, string> = { Authorization: `Bearer ${apiKey}` }
+  try {
+    // 1) снять эмбеддинги из рабочего пространства (убирает документ из ответов RAG)
+    const wsR = await fetch(`${base}/workspaces`, { headers: H })
+    if (wsR.ok) {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const wsD = (await wsR.json()) as any
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const slug: string | undefined = (wsD.workspaces || []).find((w: any) => w.name === workspaceName)?.slug
+      if (slug) {
+        await fetch(`${base}/workspace/${slug}/update-embeddings`, {
+          method: 'POST',
+          headers: { ...H, 'Content-Type': 'application/json' },
+          body: JSON.stringify({ deletes: [location] })
+        }).catch(() => {})
+      }
+    }
+    // 2) удалить исходный документ из системы (освобождает хранилище). Best-effort.
+    await fetch(`${base}/system/remove-documents`, {
+      method: 'DELETE',
+      headers: { ...H, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ names: [location] })
+    }).catch(() => {})
     return { ok: true }
   } catch (e) {
     return { ok: false, error: String(e) }
@@ -416,6 +455,19 @@ function startServer(): void {
 
 function startCollector(): void {
   if (collectorProc) return
+  // При старте collector зовёт wipeCollectorStorage(), которая читает collector/hotdir
+  // и collector/storage/tmp. Если storage/tmp нет (свежая установка), там баг апстрима
+  // (нет return после resolve при ошибке readdir) → «TypeError: files is not iterable»
+  // роняет процесс, и AnythingLLM «не поднимается за 120с». Создаём папки заранее.
+  try {
+    const colRoot = join(repoDir(), 'collector')
+    const hot = join(colRoot, 'hotdir')
+    mkdirSync(hot, { recursive: true })
+    if (!existsSync(join(hot, '__HOTDIR__.md'))) writeFileSync(join(hot, '__HOTDIR__.md'), '')
+    mkdirSync(join(colRoot, 'storage', 'tmp'), { recursive: true })
+  } catch {
+    /* ignore */
+  }
   const outStream = createWriteStream(join(baseDir(), 'runtime.log'), { flags: 'a' })
   collectorProc = spawn(anyNode(), ['index.js'], {
     cwd: join(repoDir(), 'collector'),

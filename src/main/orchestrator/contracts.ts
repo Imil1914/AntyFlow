@@ -41,9 +41,11 @@ export type Budget = {
 export const DEFAULT_BUDGET: Budget = {
   project_token_budget: 200000,
   max_tokens_per_task: 40000,
-  max_iterations_per_mode: 5,
+  // Меньше итераций и глубины рекурсии: при 5 итерациях × глубине 4 веер вызовов
+  // разрастался экспоненциально (тысячи задач → шквал → rate-limit → зависания/провал).
+  max_iterations_per_mode: 3,
   max_parallel_nodes: 3,
-  max_recursion_depth: 4
+  max_recursion_depth: 2
 }
 
 // --- Контракт результата подзадачи (раздел 2.4 ТЗ) — «конверт» наверх ---
@@ -154,10 +156,48 @@ export interface Runtime {
   humanRequest(req: Omit<HumanRequest, 'request_id' | 'project_id'>): Promise<HumanDecision>
   // Рекурсия — попросить main заспавнить саб-оркестратор (worker-сиблинг)
   spawnSub(args: { goal: string; budget: Budget; materials: string[] }): Promise<TaskResult>
+  // --- Инструменты ресерча (скилл lecture-forge, научные темы) ---
+  // Поиск статей (OpenAlex, «хорошие журналы»)
+  papersSearch(args: { query: string; yearFrom?: number; yearTo?: number; limit?: number }): Promise<PaperLite[]>
+  // Скачать PDF статьи → base64 (для заливки в AnythingLLM)
+  papersPdf(args: { doi?: string; pdfUrl?: string; source?: string }): Promise<{ ok: boolean; base64?: string }>
+  // Поднять AnythingLLM (вернёт, запущен ли)
+  anythingEnsure(): Promise<boolean>
+  // Залить документ в базу знаний AnythingLLM
+  anythingIngest(args: { base64: string; name: string }): Promise<{ ok: boolean; location?: string }>
+  // Создать ноды на доске-канвасе (статьи/гипотезы/заметки), кластеры по граням
+  boardCreateNodes(nodes: BoardNodeSpec[]): Promise<void>
+  // Вписать запрос в веб-чат-ноду (ChatGPT/Gemini/GLM) на холсте и дождаться ответа.
+  // target — id конкретной ноды; provider — 'webgpt'|'webgemini'|'webglm' (иначе первая доступная).
+  webLLMAsk(args: { prompt: string; target?: string; provider?: string; timeoutMs?: number }): Promise<{ ok: boolean; text: string; provider?: string }>
+
   // Отмена / исчерпание бюджета — проверять в циклах
   isCancelled(): boolean
   // Уникальные id
   newId(prefix: string): string
+}
+
+// Облегчённая статья (для research-фазы и досок)
+export type PaperLite = {
+  title: string
+  authors: string[]
+  year: number | null
+  venue: string
+  doi: string
+  url: string
+  pdfUrl: string
+  abstract: string
+  oa: boolean
+}
+
+// Спека ноды на доске, создаваемой оркестратором.
+export type BoardNodeSpec = {
+  kind: 'paper' | 'hypothesis' | 'note' | 'kanban'
+  title: string
+  body?: string // markdown-тело (для note/hypothesis) или JSON (для kanban)
+  facet?: string // грань темы — для кластеризации на доске
+  url?: string // кликабельная ссылка (DOI)
+  meta?: Record<string, unknown>
 }
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string }
@@ -176,6 +216,12 @@ export type WorkerToMain =
   | { t: 'findCandidates'; reqId: string; req: NodeRequirements }
   | { t: 'spawnSub'; reqId: string; goal: string; budget: Budget; materials: string[] }
   | { t: 'humanRequest'; reqId: string; taskId: string; reason: string; best_output_key: string; best_summary: string }
+  | { t: 'papersSearch'; reqId: string; args: { query: string; yearFrom?: number; yearTo?: number; limit?: number } }
+  | { t: 'papersPdf'; reqId: string; args: { doi?: string; pdfUrl?: string; source?: string } }
+  | { t: 'anythingEnsure'; reqId: string }
+  | { t: 'anythingIngest'; reqId: string; args: { base64: string; name: string } }
+  | { t: 'boardCreateNodes'; reqId: string; nodes: BoardNodeSpec[] }
+  | { t: 'webLLMAsk'; reqId: string; prompt: string; target?: string; provider?: string; timeoutMs?: number }
   | { t: 'trace'; entry: TraceEntry }
   | { t: 'status'; ev: Omit<StatusEvent, 'project_id' | 'depth'> }
   | { t: 'result'; result: TaskResult }
@@ -191,6 +237,12 @@ export type MainToWorker =
   | { t: 'findCandidatesRes'; reqId: string; entries: NodeRegistryEntry[] }
   | { t: 'spawnSubRes'; reqId: string; result: TaskResult }
   | { t: 'humanRequestRes'; reqId: string; decision: HumanDecision }
+  | { t: 'papersSearchRes'; reqId: string; papers: PaperLite[] }
+  | { t: 'papersPdfRes'; reqId: string; res: { ok: boolean; base64?: string } }
+  | { t: 'anythingEnsureRes'; reqId: string; running: boolean }
+  | { t: 'anythingIngestRes'; reqId: string; res: { ok: boolean; location?: string } }
+  | { t: 'boardCreateNodesRes'; reqId: string }
+  | { t: 'webLLMAskRes'; reqId: string; res: { ok: boolean; text: string; provider?: string } }
 
 // Данные, передаваемые воркеру при старте
 export type WorkerData = {

@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from 'react'
+import React, { useCallback, useEffect, useRef, useState } from 'react'
 import { createPortal } from 'react-dom'
 import {
   ArrowShapeUtil,
@@ -121,6 +121,9 @@ const KINDS: Record<string, { color: string; grad: string; icon: string }> = {
   opencode: { color: '#F97316', grad: 'linear-gradient(160deg,#fb923c,#F97316)', icon: '🖥' },
   anythingllm: { color: '#14B8A6', grad: 'linear-gradient(160deg,#2dd4bf,#14B8A6)', icon: '🧠' },
   openscience: { color: '#2C7BE5', grad: 'linear-gradient(160deg,#5b9cf0,#2C7BE5)', icon: '🔬' },
+  webgpt: { color: '#10A37F', grad: 'linear-gradient(160deg,#1fbe97,#10A37F)', icon: '💬' },
+  webgemini: { color: '#4285F4', grad: 'linear-gradient(160deg,#6fa8ff,#4285F4)', icon: '✦' },
+  webglm: { color: '#3B6FF6', grad: 'linear-gradient(160deg,#6d94ff,#3B6FF6)', icon: '🌐' },
   notebook: { color: '#F9A825', grad: 'linear-gradient(160deg,#ffca28,#F9A825)', icon: '📓' },
   pdf: { color: '#FF6B6B', grad: 'linear-gradient(160deg,#ff8a8a,#FF6B6B)', icon: '📕' },
   orchestrator: { color: '#A78BFA', grad: 'linear-gradient(160deg,#c4b1ff,#A78BFA)', icon: '🕸' },
@@ -150,6 +153,9 @@ const KIND_NAME: Record<string, string> = {
   opencode: 'OpenCode',
   anythingllm: 'AnythingLLM',
   openscience: 'OpenScience',
+  webgpt: 'ChatGPT',
+  webgemini: 'Gemini',
+  webglm: 'GLM',
   notebook: 'Ноутбук',
   pdf: 'PDF',
   orchestrator: 'Оркестратор',
@@ -221,16 +227,140 @@ function stripAnsi(s: string): string {
   }
   return out
 }
+
+// ============================================================================
+// Веб-чат-ноды (ChatGPT / Gemini / GLM). Встраиваем публичный сайт в <webview> с
+// ОТДЕЛЬНОЙ persist-сессией на провайдера → пользователь логинится своим аккаунтом,
+// логин сохраняется между запусками. Нода умеет: (1) снимать транскрипт диалога в
+// agentTranscripts (чтобы API-ноды видели его по стрелке), (2) программно вписать
+// запрос в поле ввода веб-чата и дождаться ответа — этим пользуется и кнопка, и мост
+// оркестратора. Селекторы сайтов хрупкие: при поломке верстки их правят тут.
+// ============================================================================
+type WebLLMKind = 'webgpt' | 'webgemini' | 'webglm'
+type WebLLMConf = {
+  name: string
+  url: string
+  partition: string
+  bg: string
+  // JS в контексте страницы: вписать текст в поле ввода и отправить. Возвращает true при успехе.
+  inject: (text: string) => string
+  // JS: вернуть innerText ПОСЛЕДНЕГО ответа ассистента ('' если нет).
+  lastReply: string
+}
+// Экранируем текст в JS-строковый литерал (внутри одинарных кавычек).
+function jsStr(s: string): string {
+  return "'" + String(s).replace(/\\/g, '\\\\').replace(/'/g, "\\'").replace(/\n/g, '\\n').replace(/\r/g, '') + "'"
+}
+// Универсальная отправка: найти поле (по списку селекторов), вписать текст через
+// execCommand('insertText') (работает и в ProseMirror/Quill), затем нажать «отправить»
+// (кнопка по селектору ИЛИ Enter). Возвращает true, если поле нашлось.
+function buildInject(inputSels: string[], sendSels: string[]): (text: string) => string {
+  const inSel = JSON.stringify(inputSels)
+  const sendSel = JSON.stringify(sendSels)
+  return (text: string) => `(function(){
+    try {
+      var TXT = ${jsStr(text)};
+      var el = null, sels = ${inSel};
+      for (var i=0;i<sels.length;i++){ el = document.querySelector(sels[i]); if(el) break; }
+      if(!el){ el = document.querySelector('textarea:not([disabled])') || document.querySelector('[contenteditable="true"]'); }
+      if(!el) return false;
+      el.focus();
+      if (el.tagName === 'TEXTAREA' || el.tagName === 'INPUT') {
+        var setter = Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype,'value') || Object.getOwnPropertyDescriptor(window.HTMLInputElement.prototype,'value');
+        if (setter && setter.set) setter.set.call(el, TXT); else el.value = TXT;
+        el.dispatchEvent(new Event('input', { bubbles: true }));
+      } else {
+        try { document.execCommand('selectAll', false, null); document.execCommand('insertText', false, TXT); }
+        catch(e){ el.textContent = TXT; }
+        el.dispatchEvent(new InputEvent('input', { bubbles: true, data: TXT }));
+      }
+      var send = function(){
+        var bs = ${sendSel};
+        for (var j=0;j<bs.length;j++){ var b = document.querySelector(bs[j]); if(b && !b.disabled){ b.click(); return true; } }
+        var ev = { bubbles:true, cancelable:true, key:'Enter', code:'Enter', keyCode:13, which:13 };
+        el.dispatchEvent(new KeyboardEvent('keydown', ev));
+        el.dispatchEvent(new KeyboardEvent('keyup', ev));
+        return true;
+      };
+      setTimeout(send, 220);
+      return true;
+    } catch(e){ return false; }
+  })()`
+}
+// JS для чтения последнего ответа ассистента по набору селекторов (fallback — весь текст).
+function buildLastReply(sels: string[]): string {
+  return `(function(){
+    try {
+      var sels = ${JSON.stringify(sels)};
+      for (var i=0;i<sels.length;i++){
+        var els = document.querySelectorAll(sels[i]);
+        if (els.length){ var t = els[els.length-1].innerText || ''; if(t.trim()) return t.trim(); }
+      }
+      return '';
+    } catch(e){ return ''; }
+  })()`
+}
+const WEBLLM: Record<WebLLMKind, WebLLMConf> = {
+  webgpt: {
+    name: 'ChatGPT',
+    url: 'https://chatgpt.com/',
+    partition: 'persist:webllm-chatgpt',
+    bg: '#212121',
+    inject: buildInject(['#prompt-textarea', 'textarea[data-testid="prompt-textarea"]'], ['[data-testid="send-button"]', 'button[aria-label*="Send"]', 'button[aria-label*="Отправить"]']),
+    lastReply: buildLastReply(['[data-message-author-role="assistant"] .markdown', '[data-message-author-role="assistant"]'])
+  },
+  webgemini: {
+    name: 'Gemini',
+    url: 'https://gemini.google.com/app',
+    partition: 'persist:webllm-gemini',
+    bg: '#1b1c1d',
+    inject: buildInject(['.ql-editor[contenteditable="true"]', 'rich-textarea .ql-editor', 'div[contenteditable="true"]'], ['button.send-button', 'button[aria-label*="Send"]', 'button[aria-label*="Отправить"]']),
+    lastReply: buildLastReply(['message-content .markdown', '.model-response-text', 'message-content'])
+  },
+  webglm: {
+    name: 'GLM',
+    url: 'https://chat.z.ai/',
+    partition: 'persist:webllm-glm',
+    bg: '#0f1117',
+    inject: buildInject(['#chat-input', 'textarea#chat-input', 'textarea[placeholder]'], ['#send-message-button', 'button[type="submit"]', 'button[aria-label*="Send"]']),
+    lastReply: buildLastReply(['.chat-assistant', '[data-message-role="assistant"]', '.message-content'])
+  }
+}
+const webLLMConf = (kind: string): WebLLMConf => WEBLLM[(kind as WebLLMKind)] || WEBLLM.webgpt
+
+// Реестр «драйверов» смонтированных веб-чат-нод: shapeId → функция «спросить и дождаться
+// ответа». Наполняется в WebLLMBody, читается App.tsx (мост оркестратора). Как и
+// agentTranscripts — in-memory, живёт пока нода открыта.
+export type WebLLMDriver = {
+  provider: string
+  ask: (prompt: string, timeoutMs?: number) => Promise<string>
+  lastReply: () => Promise<string>
+}
+export const webLLMRegistry = new Map<string, WebLLMDriver>()
+
 // Текст-контекст из ноды-источника (для передачи в связанный чат по стрелке).
 function extractNodeContext(editor: Editor, s: FlowNodeShape): string {
   const p = s.props
   const title = (p.title || '').trim()
   // Агент-ноды с живым диалогом в терминале/webview — берём их снимок из реестра.
-  if (p.kind === 'opencode' || p.kind === 'anythingllm' || p.kind === 'openscience') {
+  if (
+    p.kind === 'opencode' ||
+    p.kind === 'anythingllm' ||
+    p.kind === 'openscience' ||
+    p.kind === 'webgpt' ||
+    p.kind === 'webgemini' ||
+    p.kind === 'webglm'
+  ) {
     const t = (agentTranscripts.get(String(s.id)) || '').trim()
     if (!t) return ''
     const label =
-      p.kind === 'opencode' ? 'OpenCode (терминал)' : p.kind === 'anythingllm' ? 'AnythingLLM' : 'OpenScience'
+      p.kind === 'opencode'
+        ? 'OpenCode (терминал)'
+        : p.kind === 'anythingllm'
+        ? 'AnythingLLM'
+        : p.kind === 'openscience'
+        ? 'OpenScience'
+        : `Веб-чат ${webLLMConf(p.kind).name}`
     return `${label}${title ? ` «${title}»` : ''}:\n${t.slice(-8000)}`
   }
   if (p.kind === 'ai') {
@@ -332,6 +462,18 @@ function gatherChatContext(editor: Editor, nodeId: string, skipKinds?: Set<strin
 
 // Ноды, которые оркестратор НЕ должен втягивать в контекст (его собственный оверлей).
 const ORCH_SKIP_KINDS = new Set(['orchtask', 'orchcall', 'orchestrator'])
+
+// Понятные метки ролей под-агентов оркестратора (для панели выбора моделей).
+const ORCH_ROLE_LABEL: Record<string, string> = {
+  writer: '✍ Писатель',
+  critic: '🔍 Критик',
+  coder: '💻 Кодер',
+  researcher: '🔬 Исследователь',
+  synthesizer: '🧩 Синтезатор',
+  selector: '🎯 Селектор',
+  reviewer: '📝 Ревьюер',
+  planner: '🗂 Планировщик'
+}
 
 const IMAGE_SIZES: Record<string, [number, number]> = {
   'Квадрат 1024': [1024, 1024],
@@ -1209,14 +1351,16 @@ async function downloadPapersAction(
       if (!res.ok) continue
       const pdfId = 'pdf_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
       const imp = await window.flow.pdfImport({ base64: res.base64, id: pdfId })
+      const extra: { pdfId: string; name: string; anyDoc?: string } = { pdfId, name: p.title }
+      let nid: ReturnType<typeof createShapeId> | null = null
       if (imp.ok) {
-        const nid = createShapeId()
+        nid = createShapeId()
         editor.createShape<FlowNodeShape>({
           id: nid,
           type: 'flow-node',
           x: b ? b.maxX + 90 : 0,
           y: (b ? b.y : 0) + y,
-          props: { kind: 'pdf', title: p.title.slice(0, 90), body: '', history: '[]', extra: JSON.stringify({ pdfId, name: p.title }), w: 480, h: 620, sourceId: String(sourceId) }
+          props: { kind: 'pdf', title: p.title.slice(0, 90), body: '', history: '[]', extra: JSON.stringify(extra), w: 480, h: 620, sourceId: String(sourceId) }
         })
         connectArrow(editor, sourceId, nid)
         y += 660
@@ -1224,7 +1368,14 @@ async function downloadPapersAction(
       }
       if (toKb) {
         const ing = await window.flow.anythingIngest({ base64: res.base64, name: p.title })
-        if (ing.ok) kb++
+        if (ing.ok) {
+          kb++
+          // Привязываем документ к ноде → при её удалении уберём и из RAG AnythingLLM.
+          if (nid && ing.location) {
+            extra.anyDoc = ing.location
+            editor.updateShape({ id: nid, type: 'flow-node', props: { extra: JSON.stringify(extra) } } as never)
+          }
+        }
       }
     } catch {
       /* пропускаем недоступные */
@@ -1595,8 +1746,8 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
           background: C.field,
           border: `1px solid ${dragOver ? C.blue : C.border}`,
           borderRadius: 12,
-          padding: 8,
-          minHeight: 96
+          padding: 10,
+          minHeight: 150
         }}
       >
         <textarea
@@ -1607,13 +1758,13 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
           style={{
             flex: 1,
             resize: 'none',
-            minHeight: 44,
+            minHeight: 92,
             background: 'transparent',
             border: 'none',
             outline: 'none',
             color: C.text,
-            fontSize: 12.5,
-            lineHeight: 1.5,
+            fontSize: 13.5,
+            lineHeight: 1.55,
             fontFamily: 'inherit'
           }}
         />
@@ -2045,28 +2196,51 @@ function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor })
     const sources = ['openalex']
     if (useElsevier) sources.push('elsevier')
     try {
-      // Естественный запрос → английские ключевые слова (OpenAlex ищет по ним точнее).
-      let q = body.trim()
+      // Локальная чистка запроса — работает БЕЗ модели: убираем «мусорные» слова
+      // (собери/найди/статьи/по/за/год…) и 4-значные годы (они уходят в фильтр по дате).
+      // Иначе OpenAlex ищет по целой фразе-предложению и находит 0.
+      const STOPWORDS = new Set([
+        'собери','сбери','найди','найти','подбери','подбор','покажи','дай','нужны','нужно','хочу',
+        'статьи','статья','статей','работы','работа','публикации','публикация','исследования','исследование','литература','обзор',
+        'по','о','об','обо','про','за','год','года','году','лет','на','тему','теме','темы','для','и','в','с','из','к','от',
+        'find','search','papers','paper','articles','article','about','on','for','the','a','an','of','in','to','year','years','please'
+      ])
+      const cleanQuery = (s: string): string => {
+        const c = s
+          .replace(/\b20\d{2}\b/g, ' ')
+          .replace(/[«»"'`.,;:!?()[\]]/g, ' ')
+          .split(/\s+/)
+          .filter((w) => w && !STOPWORDS.has(w.toLowerCase()))
+          .join(' ')
+          .trim()
+        return c || s.trim()
+      }
+      // Естественный запрос → английские ключевые слова (OpenAlex ищет по ним точнее,
+      // и результаты идут из международных журналов, а не русских репозиториев).
+      // Базовый запрос — уже очищенный (на случай, если ни одна модель недоступна).
+      let q = cleanQuery(body)
       try {
-        const dec = await window.flow.aiChat({
-          model,
-          messages: [
-            {
-              role: 'system',
-              content:
-                'Извлеки из запроса пользователя КЛЮЧЕВЫЕ СЛОВА для поиска научных статей, ПЕРЕВЕДИ на английский. ' +
-                'Ответь ТОЛЬКО строкой из 2–6 ключевых слов через пробел, без кавычек и пояснений. ' +
-                'Убери слова вроде «найди», «статьи», числа.'
-            },
-            { role: 'user', content: body }
-          ]
-        })
+        const messages = [
+          {
+            role: 'system' as const,
+            content:
+              'Извлеки из запроса пользователя КЛЮЧЕВЫЕ СЛОВА для поиска научных статей, ПЕРЕВЕДИ на английский. ' +
+              'Ответь ТОЛЬКО строкой из 2–6 ключевых слов через пробел, без кавычек и пояснений. ' +
+              'Убери слова вроде «найди», «статьи», числа.'
+          },
+          { role: 'user' as const, content: body }
+        ]
+        // Пробуем модель ноды; если её провайдер недоступен (напр. мёртвый ключ) —
+        // повторяем на модели по умолчанию (пустой model → берётся defaultModel).
+        let dec = await window.flow.aiChat({ model, messages })
+        if (!dec.ok) dec = await window.flow.aiChat({ model: '', messages })
         if (dec.ok) {
           const kw = dec.content.trim().replace(/^["'`]|["'`]$/g, '').replace(/\s+/g, ' ').slice(0, 120)
-          if (kw) q = kw
+          // Берём ответ модели, только если это латиница (реальный перевод), а не «извинения».
+          if (kw && /[a-z]/i.test(kw)) q = kw
         }
       } catch {
-        /* без модели ищем по исходному тексту */
+        /* без модели ищем по очищенному тексту */
       }
       // Год из исходного запроса (напр. «2025-2026») → фильтр по дате публикации.
       const years = (body.match(/\b(20\d{2})\b/g) || []).map(Number).filter((y) => y >= 1990 && y <= 2035)
@@ -2087,14 +2261,17 @@ function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor })
   }
 
   // Скачать одну статью → PDF-нода. yOffset — вертикальный сдвиг (для пачки).
-  const fetchToNode = async (p: SciPaper, yOffset: number): Promise<boolean> => {
+  // Скачивает статью в PDF-ноду на доску. Если toKb — ещё и заливает в AnythingLLM
+  // и привязывает документ к ноде (extra.anyDoc), чтобы удаление ноды убрало его из RAG.
+  const fetchToNode = async (p: SciPaper, yOffset: number, toKb = false): Promise<{ node: boolean; kb: boolean }> => {
     const res = await window.flow.papersPdf({ doi: p.doi, pdfUrl: p.pdfUrl, source: p.source })
-    if (!res.ok) return false
+    if (!res.ok) return { node: false, kb: false }
     const pdfId = 'pdf_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 6)
     const imp = await window.flow.pdfImport({ base64: res.base64, id: pdfId })
-    if (!imp.ok) return false
+    if (!imp.ok) return { node: false, kb: false }
     const b = editor.getShapePageBounds(shape.id as never)
     const nid = createShapeId()
+    const extra: { pdfId: string; name: string; anyDoc?: string } = { pdfId, name: p.title }
     editor.createShape<FlowNodeShape>({
       id: nid,
       type: 'flow-node',
@@ -2105,14 +2282,25 @@ function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor })
         title: p.title.slice(0, 90),
         body: '',
         history: '[]',
-        extra: JSON.stringify({ pdfId, name: p.title }),
+        extra: JSON.stringify(extra),
         w: 480,
         h: 620,
         sourceId: String(shape.id)
       }
     })
     connectArrow(editor, shape.id, nid)
-    return true
+    let kb = false
+    if (toKb) {
+      const ing = await window.flow.anythingIngest({ base64: res.base64, name: p.title })
+      if (ing.ok) {
+        kb = true
+        if (ing.location) {
+          extra.anyDoc = ing.location
+          editor.updateShape({ id: nid, type: 'flow-node', props: { extra: JSON.stringify(extra) } } as never)
+        }
+      }
+    }
+    return { node: true, kb }
   }
 
   const downloadPaper = async (p: SciPaper) => {
@@ -2120,8 +2308,8 @@ function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor })
     setDl(p.id)
     setError(null)
     try {
-      const ok = await fetchToNode(p, 0)
-      if (!ok) setError('PDF недоступен (нет open-access и не сработал доступ по подписке)')
+      const r = await fetchToNode(p, 0)
+      if (!r.node) setError('PDF недоступен (нет open-access и не сработал доступ по подписке)')
     } catch (e) {
       setError(String(e))
     } finally {
@@ -2129,38 +2317,35 @@ function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor })
     }
   }
 
-  // Скачать все найденные статьи (до 15) и залить в базу знаний AnythingLLM.
+  // Скачать все найденные статьи (до 15) на доску PDF-нодами И залить в AnythingLLM.
+  // Каждый документ привязан к своей ноде (extra.anyDoc) — удалишь ноду, уйдёт и из RAG.
   const downloadAllToKb = async () => {
     if (dl || kbBusy) return
     setKbMsg('')
     setKbBusy(true)
     const batch = papers.slice(0, 15)
-    let done = 0
-    let pdfFail = 0
-    let ingestErr = ''
+    let nodes = 0
+    let kb = 0
+    let y = 0
     for (const p of batch) {
       try {
-        const res = await window.flow.papersPdf({ doi: p.doi, pdfUrl: p.pdfUrl, source: p.source })
-        if (!res.ok) {
-          pdfFail++
-          continue
+        const r = await fetchToNode(p, y, true)
+        if (r.node) {
+          nodes++
+          y += 660
         }
-        const ing = await window.flow.anythingIngest({ base64: res.base64, name: p.title })
-        if (ing.ok) done++
-        else if (!ingestErr) ingestErr = ing.error || 'ошибка заливки'
-      } catch (e) {
-        if (!ingestErr) ingestErr = String(e)
+        if (r.kb) kb++
+      } catch {
+        /* пропускаем недоступные */
       }
     }
     setKbBusy(false)
-    if (done) {
-      setKbMsg(`📚 Залито ${done} из ${batch.length} в AnythingLLM (workspace «Flow»)`)
-    } else if (ingestErr) {
-      setKbMsg('❌ ' + ingestErr)
-    } else if (pdfFail) {
-      setKbMsg(`❌ PDF не скачались (${pdfFail}) — нет open-access/подписки на эти статьи`)
+    if (kb) {
+      setKbMsg(`📚 ${kb} из ${batch.length} в AnythingLLM + на доске (нода = документ, удалишь ноду — уйдёт из базы)`)
+    } else if (nodes) {
+      setKbMsg(`Ноды созданы (${nodes}), но в AnythingLLM не залилось — запущен ли он и указан ли API-ключ?`)
     } else {
-      setKbMsg('❌ Не удалось залить')
+      setKbMsg('❌ PDF не скачались — нет open-access/подписки на эти статьи')
     }
   }
 
@@ -2174,8 +2359,8 @@ function SearchBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor })
     for (const p of batch) {
       setDl('all:' + p.id)
       try {
-        const ok = await fetchToNode(p, y)
-        if (ok) {
+        const r = await fetchToNode(p, y)
+        if (r.node) {
           done++
           y += 660 // высота PDF-ноды + отступ
         }
@@ -4066,9 +4251,8 @@ const ANY_PHASE_LABEL: Record<string, string> = {
 }
 
 function AnythingBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
-  // editor может пригодиться позже (стрелки→эмбеддинги); пока не используется тут
-  void editor
   const id = String(shape.id)
+  void editor
   const [st, setSt] = useState<AnyState | null>(null)
   const [progress, setProgress] = useState<string>('')
   const autoStarted = useRef(false)
@@ -4107,7 +4291,7 @@ function AnythingBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor 
       })
     }
     poll()
-    const iv = setInterval(poll, 2000)
+    const iv = setInterval(poll, 4000)
     const off = window.flow.onAnythingProgress((p) => {
       if (alive) setProgress(ANY_PHASE_LABEL[p.phase] ? `${ANY_PHASE_LABEL[p.phase]} ${p.message || ''}`.trim() : p.message)
     })
@@ -4243,6 +4427,250 @@ const anyBtnStyle: React.CSSProperties = {
 // веб-интерфейсе воркспейса. Требует `npm i -g @synsci/openscience`.
 type OsState = { phase: string; message: string; running: boolean; url: string; error: string; cwd?: string }
 
+// ---------- Веб-чат-нода (ChatGPT / Gemini / GLM с логином) ----------
+function WebLLMBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
+  const id = String(shape.id)
+  const cfg = webLLMConf(shape.props.kind)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const wvRef = useRef<any>(null)
+  const [ready, setReady] = useState(false)
+  const [prompt, setPrompt] = useState('')
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+  const [ctxLen, setCtxLen] = useState(0) // сколько символов снято и доступно связанным нодам
+
+  const runJS = (code: string): Promise<unknown> => {
+    const wv = wvRef.current
+    if (!wv || !wv.executeJavaScript) return Promise.reject(new Error('webview не готов'))
+    return wv.executeJavaScript(code, true)
+  }
+  // Снять текст диалога из webview в реестр (его видят API-ноды по стрелке). Берём
+  // основной контейнер (main/article), иначе весь body. Возвращаем длину снятого.
+  const captureNow = useCallback(async (): Promise<number> => {
+    try {
+      const txt = String(
+        (await runJS(
+          '(function(){var m=document.querySelector("main")||document.querySelector("[role=main]")||document.querySelector("article");var t=(m&&m.innerText)||(document.body&&document.body.innerText)||"";return t;})()'
+        )) || ''
+      )
+      setAgentTranscript(id, txt)
+      const len = (agentTranscripts.get(id) || '').length
+      setCtxLen(len)
+      return len
+    } catch {
+      return 0
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id])
+  const readLast = async (): Promise<string> => {
+    try {
+      return String((await runJS(cfg.lastReply)) || '')
+    } catch {
+      return ''
+    }
+  }
+
+  // Вписать запрос в поле ввода веб-чата и дождаться нового стабильного ответа.
+  const ask = useCallback(
+    async (text: string, timeoutMs = 150000): Promise<string> => {
+      const q = (text || '').trim()
+      if (!q) return ''
+      const before = await readLast()
+      const ok = await runJS(cfg.inject(q)).catch(() => false)
+      if (!ok) throw new Error(`Не нашёл поле ввода в ${cfg.name} (нужно войти / открыть чат)`)
+      const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms))
+      const t0 = Date.now()
+      let last = ''
+      let stable = 0
+      // Ждём, пока ответ (а) сменится относительно прежнего и (б) перестанет расти ~5с.
+      while (Date.now() - t0 < timeoutMs) {
+        await sleep(1600)
+        const cur = await readLast()
+        if (!cur || cur === before) continue
+        if (cur === last) {
+          stable++
+          if (stable >= 3) break
+        } else {
+          stable = 0
+          last = cur
+        }
+      }
+      return (last || (await readLast()) || '').trim()
+    },
+    [cfg]
+  )
+
+  // Регистрируем драйвер, пока нода смонтирована — им пользуется мост оркестратора (App.tsx).
+  useEffect(() => {
+    webLLMRegistry.set(id, {
+      provider: cfg.name,
+      ask: (p, t) => ask(p, t),
+      lastReply: readLast
+    })
+    return () => {
+      webLLMRegistry.delete(id)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [id, ask])
+
+  // Готовность webview (для плейсхолдера поля ввода).
+  useEffect(() => {
+    const wv = wvRef.current
+    if (!wv || !wv.addEventListener) return
+    const on = (): void => setReady(true)
+    wv.addEventListener('dom-ready', on)
+    return () => {
+      try {
+        wv.removeEventListener('dom-ready', on)
+      } catch {
+        /* ignore */
+      }
+    }
+  }, [])
+
+  // Снимок диалога в реестр — для контекста по стрелке (API-ноды). Периодически +
+  // сразу после готовности страницы (иначе первые секунды контекст пустой).
+  useEffect(() => {
+    void captureNow()
+    const iv = setInterval(() => void captureNow(), 3000)
+    return () => clearInterval(iv)
+  }, [captureNow])
+
+  const sendPrompt = async (): Promise<void> => {
+    const q = prompt.trim()
+    if (!q || busy) return
+    setBusy(true)
+    setNote('Отправляю запрос в веб-чат…')
+    try {
+      const reply = await ask(q)
+      if (reply) {
+        ensureResultCard(editor, shape.id, reply)
+        setNote('Ответ добавлен нодой ✓')
+        setPrompt('')
+      } else {
+        setNote('Ответ не распознан — используйте «➕ ответ в ноду»')
+      }
+    } catch (e) {
+      setNote((e as Error).message)
+    } finally {
+      setBusy(false)
+      setTimeout(() => setNote(''), 4000)
+    }
+  }
+
+  // Взять последний ответ из веб-чата как есть → отдельная нода-ответ.
+  const extractLast = async (): Promise<void> => {
+    setNote('Читаю последний ответ…')
+    const reply = await readLast()
+    if (reply) {
+      ensureResultCard(editor, shape.id, reply)
+      setNote('Ответ добавлен нодой ✓')
+    } else {
+      setNote('Не нашёл ответ в чате')
+    }
+    setTimeout(() => setNote(''), 4000)
+  }
+
+  const navBtn: React.CSSProperties = {
+    border: 'none',
+    background: 'rgba(255,255,255,0.09)',
+    color: '#e6edf3',
+    width: 24,
+    height: 24,
+    borderRadius: 6,
+    fontSize: 13,
+    lineHeight: 1,
+    cursor: 'pointer',
+    display: 'flex',
+    alignItems: 'center',
+    justifyContent: 'center',
+    flexShrink: 0,
+    fontFamily: NODE_SANS
+  }
+
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      style={{ display: 'flex', flexDirection: 'column', height: '100%', borderRadius: 8, overflow: 'hidden', background: cfg.bg }}
+    >
+      {/* Тулбар */}
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 5,
+          padding: '6px 8px',
+          background: '#0d1117',
+          borderBottom: `1px solid ${C.border}`,
+          flexShrink: 0
+        }}
+      >
+        <span style={{ font: `700 11px ${NODE_SANS}`, color: KINDS[shape.props.kind]?.color || '#fff', letterSpacing: '.03em' }}>
+          {cfg.name}
+        </span>
+        <button onClick={() => { try { wvRef.current?.reload() } catch { /* ignore */ } }} onPointerDown={stopEventPropagation} style={navBtn} title="Обновить">
+          ↻
+        </button>
+        <button
+          onClick={() => void captureNow()}
+          onPointerDown={stopEventPropagation}
+          style={{ ...navBtn, width: 'auto', padding: '0 7px', gap: 4, color: ctxLen > 0 ? '#4ADE80' : '#8b93a3', fontSize: 10.5, fontWeight: 700 }}
+          title={`Снято ${ctxLen} символов диалога. Именно это видят ноды, соединённые с этой веб-нодой СТРЕЛКОЙ. Клик — снять сейчас.`}
+        >
+          📄 {ctxLen > 999 ? (ctxLen / 1000).toFixed(1) + 'k' : ctxLen}
+        </button>
+        <div style={{ flex: 1, fontSize: 10, fontFamily: NODE_MONO, color: C.textDim, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', textAlign: 'right' }}>
+          {cfg.url.replace(/^https?:\/\//, '').replace(/\/$/, '')}
+        </div>
+        <button onClick={() => { try { window.open(cfg.url, '_blank') } catch { /* ignore */ } }} onPointerDown={stopEventPropagation} style={navBtn} title="Открыть в браузере">
+          ↗
+        </button>
+      </div>
+      {/* Webview: своя persist-сессия → логин своим аккаунтом сохраняется */}
+      <div style={{ flex: 1, position: 'relative', background: cfg.bg }}>
+        {React.createElement('webview' as any, {
+          ref: wvRef,
+          src: cfg.url,
+          partition: cfg.partition,
+          allowpopups: 'true',
+          style: { width: '100%', height: '100%', border: 'none', background: cfg.bg }
+        })}
+      </div>
+      {/* Ввод: программно вписать запрос в веб-чат и забрать ответ нодой */}
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 5, padding: '6px 8px', background: '#0d1117', borderTop: `1px solid ${C.border}`, flexShrink: 0 }}>
+        {note && <div style={{ font: `500 10.5px ${NODE_SANS}`, color: C.textDim }}>{note}</div>}
+        <div style={{ display: 'flex', gap: 5 }}>
+          <input
+            value={prompt}
+            onChange={(e) => setPrompt(e.currentTarget.value)}
+            onPointerDown={stopEventPropagation}
+            onKeyDown={(e) => { if (e.code === 'Enter' && !e.shiftKey) { e.preventDefault(); void sendPrompt() } }}
+            placeholder={ready ? `Запрос в ${cfg.name}…` : 'Загрузка…'}
+            style={{ flex: 1, minWidth: 0, background: C.field, border: `1px solid ${C.border}`, borderRadius: 7, color: C.text, fontSize: 11.5, padding: '6px 9px', fontFamily: NODE_SANS, outline: 'none' }}
+          />
+          <button
+            onClick={() => void sendPrompt()}
+            onPointerDown={stopEventPropagation}
+            disabled={busy}
+            style={{ border: 'none', background: KINDS[shape.props.kind]?.grad, color: '#04121f', fontWeight: 700, borderRadius: 7, fontSize: 11.5, padding: '0 12px', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, fontFamily: NODE_SANS }}
+            title="Вписать запрос в веб-чат и добавить ответ нодой"
+          >
+            {busy ? '…' : '➤'}
+          </button>
+          <button
+            onClick={() => void extractLast()}
+            onPointerDown={stopEventPropagation}
+            style={{ ...navBtn, width: 'auto', padding: '0 9px' }}
+            title="Взять последний ответ из чата → отдельная нода"
+          >
+            ➕
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function OpenscienceBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
   const update = useUpdate(editor, shape)
   const id = String(shape.id)
@@ -4314,7 +4742,7 @@ function OpenscienceBody({ shape, editor }: { shape: FlowNodeShape; editor: Edit
       })
     }
     poll()
-    const iv = setInterval(poll, 2000)
+    const iv = setInterval(poll, 4000)
     const off = window.flow.onOpenscienceProgress((p) => {
       if (alive) setProgress(p.message || '')
     })
@@ -5210,6 +5638,11 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
   const [sel, setSel] = useState<PdfHighlight | null>(null)
   const [drawing, setDrawing] = useState<{ x: number; y: number; width: number; height: number } | null>(null)
 
+  // При отдалении (нода мелкая на экране) не рендерим тяжёлый pdf.js-canvas —
+  // показываем лёгкую заглушку. Резко снижает лаги при панораме, когда PDF-нод много.
+  const onscreenW = useValue('pdf-onscreen', () => shape.props.w * editor.getZoomLevel(), [editor, shape.props.w])
+  const small = onscreenW < 260
+
   const saveHls = (next: PdfHighlight[]): void => {
     setHighlights(next)
     setEx({ highlights: next })
@@ -5380,11 +5813,11 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [pdfId])
 
-  // Рендер текущей страницы
+  // Рендер текущей страницы (в т.ч. когда нода снова стала крупной — small→false)
   useEffect(() => {
-    if (!loaded || !pdfRef.current || !canvasRef.current) return
+    if (small || !loaded || !pdfRef.current || !canvasRef.current) return
     renderPage(pdfRef.current, page, canvasRef.current, 1.5).catch(() => {})
-  }, [loaded, page])
+  }, [loaded, page, small])
 
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const indexPdf = async (pdf: any): Promise<void> => {
@@ -5429,6 +5862,31 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
     return (
       <div style={{ display: 'grid', placeItems: 'center', height: '100%', color: C.textDim, fontSize: 12 }}>
         Перетащи PDF на холст
+      </div>
+    )
+  }
+
+  // Отдалён → лёгкая заглушка вместо pdf.js-canvas (плавная панорама при многих PDF).
+  if (small) {
+    return (
+      <div
+        style={{
+          display: 'grid',
+          placeItems: 'center',
+          alignContent: 'center',
+          gap: 8,
+          height: '100%',
+          padding: '0 14px',
+          textAlign: 'center',
+          color: C.textDim,
+          fontFamily: NODE_SANS
+        }}
+      >
+        <div style={{ fontSize: 40 }}>📄</div>
+        <div style={{ fontSize: 13, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis' }}>
+          {shape.props.title || 'PDF'}
+        </div>
+        <div style={{ fontSize: 10 }}>приблизь, чтобы открыть</div>
       </div>
     )
   }
@@ -5944,9 +6402,11 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
   const setEx = (patch: Record<string, unknown>) => update({ extra: JSON.stringify({ ...ex, ...patch }) })
   // Дефолты выкручены на максимум — оркестратор работает мощно «из коробки».
   const budgetLimit = ex.project_token_budget ?? 1000000
-  const maxDepth = ex.max_recursion_depth ?? 8
-  const maxIter = ex.max_iterations_per_mode ?? 10
-  const maxParallel = ex.max_parallel_nodes ?? 10
+  // Вменяемые дефолты: при 8/10/10 веер вызовов разрастался экспоненциально
+  // (рекурсия глубиной 8 → тысячи подзадач → шквал → rate-limit → зависания/провал).
+  const maxDepth = ex.max_recursion_depth ?? 2
+  const maxIter = ex.max_iterations_per_mode ?? 3
+  const maxParallel = ex.max_parallel_nodes ?? 4
   const overlayOn = (ex as { canvasOverlay?: boolean }).canvasOverlay !== false // по умолчанию вкл.
   const overlayEnabledRef = useRef(overlayOn)
   overlayEnabledRef.current = overlayOn
@@ -5970,6 +6430,25 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
   const [showTrace, setShowTrace] = useState(true)
   const [copied, setCopied] = useState(false)
   const [showSettings, setShowSettings] = useState(false)
+  // Модели под-агентов (роли реестра) + список доступных моделей.
+  const [roleModels, setRoleModels] = useState<Array<{ node_id: string; type: string; model: string }>>([])
+  const [regDefault, setRegDefault] = useState('')
+  const [modelOpts, setModelOpts] = useState<{ value: string; label: string; group: string }[]>([])
+  useEffect(() => {
+    if (!showSettings) return
+    window.flow.orchRegistry?.().then((r) => {
+      if (r?.ok) {
+        setRoleModels(r.roles)
+        setRegDefault(r.default)
+      }
+    }).catch(() => {})
+    window.flow.listModels?.().then(setModelOpts).catch(() => {})
+  }, [showSettings])
+  const setRoleModel = (nodeId: string, model: string): void => {
+    window.flow.orchRegistrySet?.({ nodeId, model }).then(() => {
+      setRoleModels((rs) => rs.map((r) => (r.node_id === nodeId ? { ...r, model: model || regDefault } : r)))
+    }).catch(() => {})
+  }
 
   // Подписки на события движка (один раз). Фильтруем по текущему projectId.
   useEffect(() => {
@@ -6189,7 +6668,9 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
             fmt +
             ' Никаких пояснений вне ответа.'
           const usr = baseCtx + `\nНаполни ноду «${node.title || KIND_NAME[k] || k}» конкретным содержимым по теме.`
-          const r = await window.flow.aiChat({ model, messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }] })
+          // Сборка — на модели по умолчанию (модель ноды может быть мёртвой, напр. Cherry
+          // с невалидным ключом — тогда авто-сборка молча падала и писала «нечего строить»).
+          const r = await window.flow.aiChat({ model: '', messages: [{ role: 'system', content: sys }, { role: 'user', content: usr }] })
           if (!r.ok) continue
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
           let data: any = null
@@ -6224,7 +6705,7 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
         canvasToolsPrompt(editor, shape.id) +
         '\nВАЖНО: используй ТОЛЬКО op:"create" (подключённые ноды уже заполнены отдельно, их НЕ дублируй).'
       const res2 = await window.flow.aiChat({
-        model,
+        model: '',
         messages: [{ role: 'system', content: sys2 }, { role: 'user', content: baseCtx + '\nСоздай недостающие ноды (только create).' }]
       })
       let extraRep = ''
@@ -6275,7 +6756,7 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
         value={body}
         onChange={(e) => update({ body: e.currentTarget.value })}
         placeholder="🕸 Опиши проект целиком — планировщик разобьёт его на подзадачи и выберет режимы…"
-        style={{ ...fieldStyle, minHeight: 52, maxHeight: 90, resize: 'none', lineHeight: 1.4 }}
+        style={{ ...fieldStyle, minHeight: 120, maxHeight: 240, resize: 'none', lineHeight: 1.55, fontSize: 13.5 }}
       />
 
       {/* Контекст по стрелкам + шестерёнка настроек */}
@@ -6390,13 +6871,74 @@ function OrchestratorBody({ shape, editor }: { shape: FlowNodeShape; editor: Edi
             />
             📚 Скачивать найденные статьи в AnythingLLM (базу знаний)
           </label>
+
+          {/* Модели под-агентов (ролей). Пусто = модель по умолчанию. */}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: 5,
+              marginTop: 2,
+              borderTop: '1px solid var(--border)',
+              paddingTop: 8
+            }}
+          >
+            <div style={{ fontSize: 10, color: C.textDim, textTransform: 'uppercase', letterSpacing: '.05em' }}>
+              Модели под-агентов
+            </div>
+            {roleModels
+              .filter((r) => r.type !== 'planner')
+              .map((r) => {
+                const cur = r.model === regDefault ? '__default__' : r.model
+                return (
+                  <label key={r.node_id} style={{ display: 'flex', alignItems: 'center', gap: 6, fontSize: 11, color: C.textDim }}>
+                    <span style={{ width: 104, flex: 'none' }}>{ORCH_ROLE_LABEL[r.type] || r.type}</span>
+                    <select
+                      className="flow-input"
+                      value={cur}
+                      onChange={(e) =>
+                        setRoleModel(r.node_id, e.currentTarget.value === '__default__' ? '' : e.currentTarget.value)
+                      }
+                      style={{
+                        flex: 1,
+                        minWidth: 0,
+                        fontSize: 11,
+                        background: 'var(--panel2)',
+                        color: 'var(--text)',
+                        border: '1px solid var(--border)',
+                        borderRadius: 6,
+                        padding: '3px 6px',
+                        cursor: 'pointer'
+                      }}
+                    >
+                      <option value="__default__">— по умолчанию —</option>
+                      {Array.from(new Set(modelOpts.map((m) => m.group))).map((g) => (
+                        <optgroup key={g} label={g}>
+                          {modelOpts
+                            .filter((m) => m.group === g)
+                            .map((m) => (
+                              <option key={m.value} value={m.value}>
+                                {m.label}
+                              </option>
+                            ))}
+                        </optgroup>
+                      ))}
+                    </select>
+                  </label>
+                )
+              })}
+            <div style={{ fontSize: 10, color: C.textDim }}>
+              Планировщик берёт модель самой ноды (поле «модель» сверху).
+            </div>
+          </div>
+
           <button
             onClick={() =>
               setEx({
                 project_token_budget: 1000000,
-                max_recursion_depth: 8,
-                max_iterations_per_mode: 10,
-                max_parallel_nodes: 10
+                max_recursion_depth: 2,
+                max_iterations_per_mode: 3,
+                max_parallel_nodes: 4
               })
             }
             style={{ ...smallBtn(C.blue), flex: 'none', alignSelf: 'flex-start', padding: '3px 10px' }}
@@ -8728,6 +9270,8 @@ function NodeBodySwitch({
     <AnythingBody shape={shape} editor={editor} />
   ) : kind === 'openscience' ? (
     <OpenscienceBody shape={shape} editor={editor} />
+  ) : kind === 'webgpt' || kind === 'webgemini' || kind === 'webglm' ? (
+    <WebLLMBody shape={shape} editor={editor} />
   ) : kind === 'notebook' ? (
     <NotebookBody shape={shape} editor={editor} />
   ) : kind === 'pdf' ? (
