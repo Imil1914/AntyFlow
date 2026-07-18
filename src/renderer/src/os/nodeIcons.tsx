@@ -135,6 +135,30 @@ export function NodeIcon({ kind, size = 15 }: { kind: string; size?: number }) {
           <path d="M8 2.4 C5.6 4.2 5.6 11.8 8 13.6 C10.4 11.8 10.4 4.2 8 2.4 Z" />
         </svg>
       )
+    case 'daylane': // День — широкая полоса с датой
+      return (
+        <svg {...p}>
+          <rect x="2" y="4.5" width="12" height="7" rx="1.5" />
+          <line x1="2" y1="7" x2="14" y2="7" />
+          <line x1="4.5" y1="4.5" x2="4.5" y2="2.5" />
+          <line x1="11.5" y1="4.5" x2="11.5" y2="2.5" />
+        </svg>
+      )
+    case 'tlaxis': // Ось таймлайна — вложенные колонки
+      return (
+        <svg {...p}>
+          <rect x="2.5" y="2.5" width="3" height="11" rx="1" />
+          <rect x="6.5" y="2.5" width="3" height="11" rx="1" />
+          <rect x="10.5" y="2.5" width="3" height="11" rx="1" />
+        </svg>
+      )
+    case 'boardmem': // Память доски — мозг/узел
+      return (
+        <svg {...p}>
+          <circle cx="8" cy="8" r="5.4" />
+          <path d="M8 2.6 V13.4 M3 6 H13 M3.4 10.2 H12.6" />
+        </svg>
+      )
     case 'notebook': // Jupyter — тетрадь с пружиной
       return (
         <svg {...p}>

@@ -18,6 +18,36 @@ const COLLECTOR_PORT = 8888
 
 // Загрузить PDF (base64) в AnythingLLM и вшить его в рабочее пространство (RAG).
 // Нужен API-ключ AnythingLLM (Settings → Developer API в его интерфейсе).
+// MIME-тип и корректное имя файла по расширению (для upload в collector).
+function mimeFor(name: string): { mime: string; fname: string } {
+  const n = (name || 'file').toLowerCase()
+  if (n.endsWith('.pdf')) return { mime: 'application/pdf', fname: name }
+  if (n.endsWith('.docx')) return { mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', fname: name }
+  if (n.endsWith('.pptx')) return { mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', fname: name }
+  if (n.endsWith('.md') || n.endsWith('.markdown')) return { mime: 'text/markdown', fname: name }
+  if (n.endsWith('.txt') || n.endsWith('.text')) return { mime: 'text/plain', fname: name }
+  if (/\.(csv|json|html?|xml|rtf)$/.test(n)) return { mime: 'text/plain', fname: name }
+  // без расширения — считаем текстом
+  return { mime: 'text/plain', fname: /\.[a-z0-9]+$/.test(n) ? name : name + '.txt' }
+}
+
+// Список рабочих пространств (проектов) AnythingLLM — для выбора, куда грузить RAG.
+export async function listWorkspaces(apiKey: string): Promise<{ ok: boolean; error?: string; workspaces?: Array<{ name: string; slug: string }> }> {
+  if (!apiKey) return { ok: false, error: 'нет API-ключа AnythingLLM' }
+  const base = `http://localhost:${ANY_PORT}/api/v1`
+  try {
+    const r = await fetch(`${base}/workspaces`, { headers: { Authorization: `Bearer ${apiKey}` } })
+    if (!r.ok) return { ok: false, error: r.status === 401 || r.status === 403 ? 'неверный API-ключ AnythingLLM' : `AnythingLLM ${r.status}` }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const d = (await r.json()) as any
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const workspaces = ((d.workspaces || []) as any[]).map((w) => ({ name: String(w.name), slug: String(w.slug) }))
+    return { ok: true, workspaces }
+  } catch (e) {
+    return { ok: false, error: String(e) }
+  }
+}
+
 export async function ingestDocument(
   base64: string,
   name: string,
@@ -62,10 +92,11 @@ export async function ingestDocument(
       collectorUp = await isCollectorHealthy()
     }
 
-    // 3) загрузить документ (multipart)
+    // 3) загрузить документ (multipart) — mimetype/имя по реальному расширению,
+    //    чтобы collector правильно распарсил не только PDF, но и docx/txt/md/pptx.
     const form = new FormData()
-    const fname = name.toLowerCase().endsWith('.pdf') ? name : name.slice(0, 120) + '.pdf'
-    form.append('file', new Blob([Buffer.from(base64, 'base64')], { type: 'application/pdf' }), fname)
+    const { mime, fname } = mimeFor(name)
+    form.append('file', new Blob([Buffer.from(base64, 'base64')], { type: mime }), fname)
     const upR = await fetch(`${base}/document/upload`, { method: 'POST', headers: H, body: form })
     if (!upR.ok) {
       let body = ''

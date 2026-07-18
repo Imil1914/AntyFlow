@@ -5,7 +5,7 @@
 // Возвращает ключи Vault (литература/гипотезы) для добавления в materials планировщика.
 // Всё «мягко»: сбой любого шага не роняет прогон — фаза просто отдаёт, что успела.
 // ============================================================================
-import type { Runtime, PaperLite, BoardNodeSpec } from './contracts'
+import type { Runtime, PaperLite } from './contracts'
 import { extractJson } from './util'
 
 type Facet = { name: string; query: string }
@@ -73,21 +73,8 @@ export async function researchPhase(
   const allPapers = byFacet.flatMap((g) => g.papers)
   const total = allPapers.length
 
-  // 3) Ноды статей на доску (кластеры по граням).
-  const nodes: BoardNodeSpec[] = []
-  for (const g of byFacet) {
-    for (const p of g.papers) {
-      const meta = [p.authors.slice(0, 4).join(', '), [p.venue, p.year].filter(Boolean).join(' · ')].filter(Boolean).join('\n')
-      const body = [meta, p.abstract ? p.abstract.slice(0, 320) + '…' : ''].filter(Boolean).join('\n\n')
-      nodes.push({
-        kind: 'paper',
-        title: p.title,
-        body,
-        facet: g.facet,
-        url: p.doi ? 'https://doi.org/' + p.doi : p.url || undefined
-      })
-    }
-  }
+  // 3) Статьи НЕ выгружаем на доску (по требованию): вместо десятков paper-нод грузим
+  //    их в базу знаний AnythingLLM (шаг 4), а на доску кладём ноду базы + сводку литературы.
 
   // 4) Заливка OA-PDF в AnythingLLM (best-effort — не блокирует прогон).
   let ingested = 0
@@ -132,21 +119,7 @@ export async function researchPhase(
     : { ok: false as const, error: 'empty corpus' }
   const hyp: Hypothesis[] =
     hRes.ok ? extractJson<{ hypotheses?: Hypothesis[] }>(hRes.content)?.hypotheses || [] : []
-  for (const h of hyp) {
-    if (!h.statement) continue
-    const body = [
-      `**Статус:** ${h.status || '—'}`,
-      `**Источники:** ${(h.refs || []).join(', ') || '—'}`,
-      h.rationale ? `**Обоснование:** ${h.rationale}` : '',
-      h.test ? `**Как проверить:** ${h.test}` : ''
-    ]
-      .filter(Boolean)
-      .join('\n\n')
-    nodes.push({ kind: 'hypothesis', title: h.statement, body, facet: 'Гипотезы' })
-  }
-
-  // Выложить всё на доску одной командой.
-  if (nodes.length) await rt.boardCreateNodes(nodes)
+  // Гипотезы на доску не выгружаем — они идут в Vault (сводку) как контекст для ТЗ.
 
   // 6) Артефакты в Vault (для планировщика/лекции).
   const bib = byFacet
@@ -167,6 +140,19 @@ export async function researchPhase(
     `# Литература (${total} статей по ${byFacet.length} граням)\n\n${bib}`,
     { kind: 'materials' }
   )
+
+  // На доску — ТОЛЬКО нода базы знаний (AnythingLLM, куда залиты статьи) + сводка литературы.
+  if (total) {
+    await rt.boardCreateNodes([
+      { kind: 'anythingllm', title: '0. База знаний: статьи (AnythingLLM)', facet: 'Ресерч' },
+      {
+        kind: 'doc',
+        title: '0. Литература — сводка',
+        body: `# Литература (${total} статей по ${byFacet.length} граням)${ingested ? `, в AnythingLLM залито ${ingested}` : ''}\n\n${bib}`,
+        facet: 'Ресерч'
+      }
+    ])
+  }
   const hypMd = hyp
     .map(
       (h, i) =>

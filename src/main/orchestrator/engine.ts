@@ -6,6 +6,7 @@
 import type { Runtime, TaskNode, TaskResult, Budget, ControlPlaneCommand, ExecutionMode, TaskStatus } from './contracts'
 import { plan } from './planner'
 import { researchPhase } from './research'
+import { webBuildPhase } from './webbuild'
 import { assembleLecture, LECTURE_FORGE_PLAYBOOK } from './lecture'
 import { selectMode } from './modeSelector'
 import { withTimeout, shortSummary } from './util'
@@ -43,10 +44,12 @@ export async function orchestrate(rt: Runtime, opts: OrchestrateOpts): Promise<T
   // статьи на доску + в AnythingLLM + гипотезы, обогащает materials для планировщика.
   let allMaterials = materials
   let scientific = false
+  let researchSummary = ''
   if (depth === 0) {
     try {
       const research = await researchPhase(rt, opts.goal)
       scientific = research.scientific
+      researchSummary = research.summary
       if (research.materials.length) allMaterials = [...materials, ...research.materials]
     } catch (e) {
       rt.trace({
@@ -64,34 +67,32 @@ export async function orchestrate(rt: Runtime, opts: OrchestrateOpts): Promise<T
     }
   }
 
-  // --- Веб-консультация (опционально) ---
-  // Если на холсте открыта веб-чат-нода (ChatGPT/Gemini/GLM с логином), оркестратор
-  // задаёт ей вопрос по цели и кладёт ответ отдельной нодой + в materials. Если веб-чата
-  // нет — rt.webLLMAsk вернёт ok:false, и фаза молча пропускается (не роняет прогон).
+  // --- Веб-сборка (приоритетный путь, только на корне) ---
+  // Если на холсте открыты веб-чат-ноды (ChatGPT/Gemini/GLM с логином), делегируем
+  // генерацию сильным веб-моделям (задачи раскидываются по нескольким моделям), а
+  // оркестратор строит настоящие ноды: канбаны/таблицы/списки/документы/схемы/заметки.
+  // Опирается на сводку ресерча. Если веб-сборка что-то дала — ЗАМЫКАЕМ прогон: дешёвый
+  // локальный planner/modes/lecture не запускаем. Веб-нод нет / пусто → идём обычным путём.
   if (depth === 0 && !rt.isCancelled()) {
     try {
-      const wl = await rt.webLLMAsk({
-        prompt:
-          `Тема проекта: ${opts.goal}\n\n` +
-          'Дай развёрнутый экспертный разбор темы: ключевые аспекты, подходы, риски и практические рекомендации. ' +
-          'Структурируй ответ по пунктам.',
-        timeoutMs: 180000
-      })
-      if (wl.ok && wl.text.trim()) {
-        await rt.boardCreateNodes([
-          {
-            kind: 'note',
-            title: `Ответ веб-чата${wl.provider ? ` (${wl.provider})` : ''}`,
-            body: wl.text.slice(0, 12000),
-            facet: 'Веб-чат'
-          }
-        ])
-        const wlKey = await rt.vaultWrite(`project:${rt.projectId}/webllm`, wl.text, { kind: 'materials' })
-        allMaterials = [...allMaterials, wlKey]
-        rt.status({ task_id: '__webllm__', status: 'success', summary: `Веб-чат${wl.provider ? ` ${wl.provider}` : ''}: ответ получен` })
+      const built = await webBuildPhase(rt, opts.goal, researchSummary)
+      if (built.ran && built.result) {
+        rt.status({ task_id: 'root', status: built.result.status, summary: built.result.summary })
+        return built.result
       }
-    } catch {
-      /* веб-консультация не критична */
+    } catch (e) {
+      rt.trace({
+        command_id: rt.newId('cmd'),
+        task_id: '__webbuild__',
+        node_id: 'role:webllm',
+        mode: 'system',
+        input_refs: [],
+        output_ref: '',
+        cost: { tokens: 0, calls: 0 },
+        duration_ms: 0,
+        timestamp: Date.now(),
+        note: `Веб-сборка упала (не критично): ${(e as Error).message}`
+      })
     }
   }
 

@@ -192,12 +192,30 @@ export type PaperLite = {
 
 // Спека ноды на доске, создаваемой оркестратором.
 export type BoardNodeSpec = {
-  kind: 'paper' | 'hypothesis' | 'note' | 'kanban'
+  kind:
+    | 'paper'
+    | 'hypothesis'
+    | 'note'
+    | 'doc'
+    | 'kanban'
+    | 'sheet'
+    | 'list'
+    | 'diagram'
+    | 'notebook'
+    | 'deck'
+    | 'search'
+    | 'ai'
+    | 'anythingllm'
   title: string
-  body?: string // markdown-тело (для note/hypothesis) или JSON (для kanban)
+  body?: string // markdown-тело (note/hypothesis/doc)
   facet?: string // грань темы — для кластеризации на доске
   url?: string // кликабельная ссылка (DOI)
   meta?: Record<string, unknown>
+  // Структурированное содержимое для интерактивных нод (renderer строит props.extra):
+  //  kanban → { columns:[{name,color?,cards:[string|{text,done?}]}] }
+  //  sheet  → { headers?:string[], rows:string[][] }  (или { cells:{"r:c":v}, rows, cols })
+  //  list   → { title?, groups:[{name,items:string[]}] }
+  data?: unknown
 }
 
 export type ChatMessage = { role: 'user' | 'assistant' | 'system'; content: string }
