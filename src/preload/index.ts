@@ -94,8 +94,9 @@ const api = {
   anythingEnsure: () => ipcRenderer.invoke('anythingllm:ensure'),
   anythingState: () => ipcRenderer.invoke('anythingllm:state'),
   anythingStop: () => ipcRenderer.invoke('anythingllm:stop'),
-  anythingIngest: (args: { base64: string; name: string }) => ipcRenderer.invoke('anythingllm:ingest', args),
+  anythingIngest: (args: { base64: string; name: string; workspace?: string }) => ipcRenderer.invoke('anythingllm:ingest', args),
   anythingRemove: (args: { location: string }) => ipcRenderer.invoke('anythingllm:remove', args),
+  anythingWorkspaces: () => ipcRenderer.invoke('anythingllm:workspaces'),
   // Оркестратор просит создать ноды на доске (research-фаза скилла lecture-forge)
   onOrchCreateNodes: (
     cb: (payload: { projectId: string; nodes: Array<Record<string, unknown>> }) => void
@@ -134,7 +135,7 @@ const api = {
   pdfBytes: (args: { id: string }) => ipcRenderer.invoke('pdf:bytes', args),
   pdfIndexAdd: (args: { id: string; chunks: Array<{ id: string; page: number; text: string; vector: number[] }> }) =>
     ipcRenderer.invoke('pdf:index-add', args),
-  pdfSearch: (args: { id: string; vector: number[]; topK?: number }) => ipcRenderer.invoke('pdf:search', args),
+  pdfSearch: (args: { id: string; vector: number[]; topK?: number; query?: string }) => ipcRenderer.invoke('pdf:search', args),
   pdfIndexed: (args: { id: string }) => ipcRenderer.invoke('pdf:indexed', args),
   pdfDelete: (args: { id: string }) => ipcRenderer.invoke('pdf:delete', args),
   pdfAsk: (args: {
@@ -244,7 +245,47 @@ const api = {
     const h = (_e: unknown, m: Parameters<typeof cb>[0]) => cb(m)
     ipcRenderer.on('orch:humanRequest', h)
     return () => ipcRenderer.removeListener('orch:humanRequest', h)
-  }
+  },
+  // Локальная БД: память доски и пер-борд мета (T1.1). Все методы возвращают
+  // { ok, data } | { ok:false, error } (кроме dbStatus).
+  memory: {
+    list: (args: { boardId: string }) => ipcRenderer.invoke('memory:list', args),
+    get: (args: { boardId: string; periodKind?: 'day' | 'week' | 'month'; periodKey: string }) =>
+      ipcRenderer.invoke('memory:get', args),
+    upsert: (args: {
+      boardId: string
+      periodKind?: 'day' | 'week' | 'month'
+      periodKey: string
+      content: string
+      ts?: number
+    }) => ipcRenderer.invoke('memory:upsert', args),
+    delete: (args: { boardId: string; periodKind?: 'day' | 'week' | 'month'; periodKey: string }) =>
+      ipcRenderer.invoke('memory:delete', args),
+    search: (args: { query: string; boardId?: string; limit?: number }) => ipcRenderer.invoke('memory:search', args),
+    embList: (args: { boardId: string }) => ipcRenderer.invoke('memory:embList', args),
+    embSet: (args: { boardId: string; periodKind?: 'day' | 'week' | 'month'; periodKey: string; vector: number[] }) =>
+      ipcRenderer.invoke('memory:embSet', args)
+  },
+  boardmeta: {
+    get: (args: { boardId: string; key: string }) => ipcRenderer.invoke('boardmeta:get', args),
+    getAll: (args: { boardId: string }) => ipcRenderer.invoke('boardmeta:getAll', args),
+    set: (args: { boardId: string; key: string; value: string }) => ipcRenderer.invoke('boardmeta:set', args)
+  },
+  nodes: {
+    reindex: (args: {
+      boardId: string
+      boardName?: string
+      nodes: { shapeId: string; kind?: string; title?: string; body?: string }[]
+    }) => ipcRenderer.invoke('nodes:reindex', args),
+    deleteBoard: (args: { boardId: string }) => ipcRenderer.invoke('nodes:deleteBoard', args),
+    search: (args: { query: string; limit?: number }) => ipcRenderer.invoke('nodes:search', args)
+  },
+  dbStatus: () => ipcRenderer.invoke('db:status'),
+  dbImportLocalDump: (args: {
+    memory: { boardId: string; periodKind?: 'day' | 'week' | 'month'; periodKey: string; content: string; ts?: number }[]
+    meta: { boardId: string; key: string; value: string }[]
+    rawDump?: string
+  }) => ipcRenderer.invoke('db:importLocalDump', args)
 }
 
 type NotebookMsg = {

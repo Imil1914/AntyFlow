@@ -59,11 +59,104 @@ export function searchPdf(
   return scored.slice(0, topK)
 }
 
+// ── T2.1: гибридный retrieval (BM25 + эмбеддинги + RRF) ──────────────────────
+// Лексический скоринг считается по чанкам индекса на лету: тексты уже сериализованы
+// в index/<id>.json, корпус одного PDF мал (десятки–сотни чанков), поэтому отдельный
+// minisearch-персист не нужен. Токенизация — по буквам/цифрам Unicode (рус+англ).
+function ragTokenize(text: string): string[] {
+  return (text || '')
+    .toLowerCase()
+    .split(/[^\p{L}\p{N}]+/u)
+    .filter((t) => t.length >= 2)
+}
+
+type Ranked = { idx: number; score: number }
+
+function bm25Rank(chunks: Chunk[], queryText: string, topK: number): Ranked[] {
+  const q = Array.from(new Set(ragTokenize(queryText)))
+  if (!q.length || !chunks.length) return []
+  const docs = chunks.map((c) => ragTokenize(c.text))
+  const N = docs.length
+  const avgdl = docs.reduce((s, d) => s + d.length, 0) / N || 1
+  const df = new Map<string, number>()
+  for (const d of docs) for (const t of new Set(d)) df.set(t, (df.get(t) || 0) + 1)
+  const idf = new Map<string, number>()
+  for (const t of q) {
+    const n = df.get(t) || 0
+    idf.set(t, Math.log(1 + (N - n + 0.5) / (n + 0.5)))
+  }
+  const k1 = 1.5
+  const b = 0.75
+  const scored: Ranked[] = docs.map((d, i) => {
+    const tf = new Map<string, number>()
+    for (const t of d) tf.set(t, (tf.get(t) || 0) + 1)
+    let s = 0
+    for (const t of q) {
+      const f = tf.get(t) || 0
+      if (!f) continue
+      s += (idf.get(t) || 0) * ((f * (k1 + 1)) / (f + k1 * (1 - b + b * (d.length / avgdl))))
+    }
+    return { idx: i, score: s }
+  })
+  return scored.filter((x) => x.score > 0).sort((a, b) => b.score - a.score).slice(0, topK)
+}
+
+function vectorRank(chunks: Chunk[], vector: number[], topK: number): Ranked[] {
+  return chunks
+    .map((c, i) => ({ idx: i, score: cosine(vector, c.vector) }))
+    .sort((a, b) => b.score - a.score)
+    .slice(0, topK)
+}
+
+// Reciprocal Rank Fusion: устойчивое слияние разношкальных ранжирований.
+function rrfMerge(rankings: Ranked[][], k = 60): Ranked[] {
+  const acc = new Map<number, number>()
+  for (const r of rankings) r.forEach((item, rank) => acc.set(item.idx, (acc.get(item.idx) || 0) + 1 / (k + rank + 1)))
+  return Array.from(acc.entries())
+    .map(([idx, score]) => ({ idx, score }))
+    .sort((a, b) => b.score - a.score)
+}
+
+/**
+ * Гибридный поиск в пределах одного PDF: top-40 лексических + top-40 векторных → RRF → top-N.
+ * hybrid=false или пустой queryText → прежнее чисто векторное поведение (мягкая деградация).
+ * Реранкер (T2.1, опционально) подключается в этом же месте, когда доступна модель — сейчас
+ * его отсутствие эквивалентно «гибрид без реранка».
+ */
+export function searchPdfHybrid(
+  id: string,
+  vector: number[] | undefined,
+  queryText: string,
+  opts?: { hybrid?: boolean; topN?: number }
+): Array<{ page: number; text: string; score: number }> {
+  const idx = loadIndex(id)
+  if (!idx.chunks.length) return []
+  const topN = Math.max(1, opts?.topN ?? 8)
+  const hasVec = !!(vector && vector.length)
+  const t0 = Date.now()
+  if (opts?.hybrid === false || !(queryText || '').trim()) {
+    const out = hasVec ? searchPdf(id, vector as number[], topN) : []
+    console.log(`[rag] pdf ${id}: vector-only top=${out.length} за ${Date.now() - t0}мс`)
+    return out
+  }
+  const tLex = Date.now()
+  const lex = bm25Rank(idx.chunks, queryText, 40)
+  const tVec = Date.now()
+  const vec = hasVec ? vectorRank(idx.chunks, vector as number[], 40) : []
+  const tMerge = Date.now()
+  const merged = rrfMerge([vec, lex]).slice(0, topN)
+  console.log(
+    `[rag] pdf ${id}: hybrid lex=${lex.length}(${tVec - tLex}мс) vec=${vec.length}(${tMerge - tVec}мс) ` +
+      `→ top=${merged.length}, всего ${Date.now() - t0}мс`
+  )
+  return merged.map((m) => ({ page: idx.chunks[m.idx].page, text: idx.chunks[m.idx].text, score: m.score }))
+}
+
 export function pdfFilePath(id: string): string {
   return pdfPath(id)
 }
 
-export function registerPdfIpc(): void {
+export function registerPdfIpc(getRag?: () => { hybrid: boolean; topN: number }): void {
   // Сохранить PDF на диск. Возвращает путь; id формирует renderer.
   ipcMain.handle('pdf:import', (_e, args: { base64: string; id: string }) => {
     try {
@@ -107,14 +200,23 @@ export function registerPdfIpc(): void {
     }
   })
 
-  // Поиск top-K строго в пределах одного pdf_id.
-  ipcMain.handle('pdf:search', (_e, args: { id: string; vector: number[]; topK?: number }) => {
-    try {
-      return { ok: true as const, chunks: searchPdf(args.id, args.vector, args.topK || 5) }
-    } catch (e) {
-      return { ok: false as const, error: String(e) }
+  // Поиск строго в пределах одного pdf_id. С queryText и включённым гибридом (T2.1) —
+  // BM25+вектор+RRF; иначе — чисто векторно (обратная совместимость).
+  ipcMain.handle(
+    'pdf:search',
+    (_e, args: { id: string; vector: number[]; topK?: number; query?: string }) => {
+      try {
+        const rag = getRag?.() ?? { hybrid: true, topN: 8 }
+        const topN = args.topK || rag.topN || 8
+        if (args.query && args.query.trim()) {
+          return { ok: true as const, chunks: searchPdfHybrid(args.id, args.vector, args.query, { hybrid: rag.hybrid, topN }) }
+        }
+        return { ok: true as const, chunks: searchPdf(args.id, args.vector, topN) }
+      } catch (e) {
+        return { ok: false as const, error: String(e) }
+      }
     }
-  })
+  )
 
   // Есть ли готовый индекс и сколько в нём чанков.
   ipcMain.handle('pdf:indexed', (_e, args: { id: string }) => {

@@ -8,11 +8,14 @@ import {
   DefaultStylePanel,
   type Editor,
   type TLAssetStore,
-  type TLComponents
+  type TLComponents,
+  type TLShapeId
 } from 'tldraw'
 import { useSync } from '@tldraw/sync'
 import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties } from 'react'
-import { FlowArrowShapeUtil, FlowNodeShapeUtil, NodeFullscreenOverlay, sheetModelFromFile, webLLMRegistry, type FlowNodeShape } from './shapes/FlowNodeShapeUtil'
+import { FlowArrowShapeUtil, FlowNodeShapeUtil, NodeFullscreenOverlay, sheetModelFromFile, webLLMRegistry, digestDayRange, rollupMemory, readBoardMem, migrateBoardExtras, searchTranscripts, type FlowNodeShape } from './shapes/FlowNodeShapeUtil'
+import { hydrateBoard, bmetaGet, bmetaSet, migrateLocalStorageToDb } from './boardStore'
+import { buildNodeIndex } from './search'
 import { DESIGN_CSS } from './slides/design'
 import SlideEditor from './slides/SlideEditor'
 import { OS_CSS, themeVars, THEME_ORDER, THEME_SWATCH, type ThemeName } from './os/theme'
@@ -21,13 +24,14 @@ import { NodeIcon, GroupIcon } from './os/nodeIcons'
 import { HierarchyPanel } from './os/HierarchyPanel'
 import {
   Toast,
-  CmdK,
+  GlobalSearch,
   RagModal,
   GraphOverlay,
   AgentsStudio,
   GenStudio,
   MobileView,
-  type Command
+  type Command,
+  type SearchNav
 } from './os/overlays'
 import { VaultView } from './vault/VaultView'
 
@@ -72,15 +76,181 @@ type OrchNodeSpec = {
   facet?: string
   url?: string
   meta?: Record<string, unknown>
+  data?: unknown // структура для интерактивных нод (kanban/sheet/list)
+}
+// Короткий id для карточек/колонок канбана (формат как у kbId в шейпах).
+const orchRid = (): string => {
+  try {
+    return crypto.randomUUID().slice(0, 8)
+  } catch {
+    return Math.random().toString(36).slice(2, 10)
+  }
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildKanbanExtra(data: any): string {
+  const palette = ['#F59E0B', '#60A5FA', '#4ADE80', '#A78BFA', '#F87171', '#2DD4BF', '#F472B6']
+  const cols = Array.isArray(data?.columns) ? data.columns : []
+  const columns = cols
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((c: any, i: number) => ({
+      id: orchRid(),
+      name: String(c?.name ?? c?.title ?? `Колонка ${i + 1}`),
+      color: typeof c?.color === 'string' ? c.color : palette[i % palette.length],
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      cards: (Array.isArray(c?.cards) ? c.cards : [])
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        .map((k: any) => ({ id: orchRid(), text: typeof k === 'string' ? k : String(k?.text ?? ''), done: typeof k === 'object' ? !!k?.done : false }))
+        .filter((k: { text: string }) => k.text)
+    }))
+    .filter((c: { name: string; cards: unknown[] }) => c.name || c.cards.length)
+  return JSON.stringify({ kanban: { columns } })
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildListExtra(data: any): string {
+  const groups = (Array.isArray(data?.groups) ? data.groups : [])
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((g: any) => ({ name: String(g?.name ?? ''), items: (Array.isArray(g?.items) ? g.items : []).map(String).filter(Boolean) }))
+    .filter((g: { name: string; items: unknown[] }) => g.name || g.items.length)
+  return JSON.stringify({ list: { title: String(data?.title ?? ''), groups } })
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildSheetExtra(data: any): string {
+  const headers = Array.isArray(data?.headers) ? data.headers.map(String) : []
+  const rows = Array.isArray(data?.rows) ? data.rows : []
+  const cells: Record<string, string> = {}
+  let cols = headers.length
+  headers.forEach((h: string, c: number) => {
+    cells[`0:${c}`] = h
+  })
+  const off = headers.length ? 1 : 0
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  rows.forEach((r: any, ri: number) => {
+    const arr = Array.isArray(r) ? r : [r]
+    cols = Math.max(cols, arr.length)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    arr.forEach((v: any, c: number) => {
+      cells[`${off + ri}:${c}`] = String(v ?? '')
+    })
+  })
+  return JSON.stringify({ sheet: { rows: Math.max(off + rows.length, 1), cols: Math.max(cols, 1), cells } })
+}
+// Размеры оркестраторной ноды по типу спеки.
+function orchDims(kind: string): { w: number; h: number } {
+  switch (kind) {
+    case 'kanban':
+      return { w: 1000, h: 460 }
+    case 'sheet':
+      return { w: 620, h: 380 }
+    case 'list':
+      return { w: 940, h: 520 }
+    case 'diagram':
+      return { w: 520, h: 420 }
+    case 'notebook':
+      return { w: 900, h: 760 }
+    case 'deck':
+      return { w: 640, h: 420 }
+    case 'ai':
+      return { w: 440, h: 480 }
+    case 'search':
+      return { w: 440, h: 380 }
+    case 'anythingllm':
+      return { w: 680, h: 560 }
+    case 'doc':
+      return { w: 400, h: 340 }
+    case 'paper':
+      return { w: 380, h: 190 }
+    default:
+      return { w: 380, h: 260 }
+  }
+}
+// Собрать историю ноутбука (props.history) из ячеек, выданных моделью.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function buildNotebookHistory(data: any): string {
+  const raw = Array.isArray(data?.cells) ? data.cells : []
+  const cells = raw
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((c: any, i: number) => ({
+      id: `cell_${orchRid()}_${i}`,
+      type: c?.type === 'markdown' ? 'markdown' : 'code',
+      source: String(c?.source ?? ''),
+      outputs: [],
+      count: null,
+      rendered: c?.type === 'markdown'
+    }))
+    .filter((c: { source: string }) => c.source.trim())
+  return JSON.stringify({ cells: cells.length ? cells : [{ id: `cell_${orchRid()}`, type: 'code', source: '', outputs: [], count: null }] })
+}
+// Собрать props шейпа из спеки оркестратора: интерактивные ноды (kanban/sheet/list) —
+// с настоящим props.extra; статьи/гипотезы/заметки — как note; документ — doc.
+function orchShapeProps(n: OrchNodeSpec): Record<string, unknown> {
+  const dims = orchDims(n.kind)
+  if (n.kind === 'kanban') {
+    return { kind: 'kanban', title: (n.title || 'Канбан').slice(0, 100), extra: buildKanbanExtra(n.data), ...dims }
+  }
+  if (n.kind === 'sheet') {
+    return { kind: 'sheet', title: (n.title || 'Таблица').slice(0, 100), extra: buildSheetExtra(n.data), ...dims }
+  }
+  if (n.kind === 'list') {
+    // Интерактивная карточка списка — kind 'listcard'.
+    return { kind: 'listcard', title: (n.title || 'Список').slice(0, 100), extra: buildListExtra(n.data), ...dims }
+  }
+  if (n.kind === 'diagram') {
+    // body = исходный код Mermaid (DiagramBody рисует его предпросмотром).
+    return { kind: 'diagram', title: (n.title || 'Схема').slice(0, 100), body: n.body || '', ...dims }
+  }
+  if (n.kind === 'notebook') {
+    return { kind: 'notebook', title: (n.title || 'Ноутбук').slice(0, 100), history: buildNotebookHistory(n.data), ...dims }
+  }
+  if (n.kind === 'deck') {
+    // body = тема презентации (DeckBody генерирует слайды по ней).
+    return { kind: 'deck', title: (n.title || 'Презентация').slice(0, 100), body: n.body || '', ...dims }
+  }
+  if (n.kind === 'ai') {
+    // body = стартовый промпт ИИ-ассистента.
+    return { kind: 'ai', title: (n.title || 'ИИ-ассистент').slice(0, 100), body: n.body || '', ...dims }
+  }
+  if (n.kind === 'search') {
+    // body = поисковый запрос (SearchBody ищет по нему).
+    return { kind: 'search', title: (n.title || 'Поиск').slice(0, 100), body: n.body || '', ...dims }
+  }
+  if (n.kind === 'anythingllm') {
+    return { kind: 'anythingllm', title: (n.title || 'База знаний').slice(0, 100), ...dims }
+  }
+  if (n.kind === 'doc') {
+    return { kind: 'doc', title: (n.title || 'Документ').slice(0, 100), body: n.body || '', ...dims }
+  }
+  // paper / hypothesis / note → note (со значком и кликабельной ссылкой)
+  const icon = n.kind === 'paper' ? '📄 ' : n.kind === 'hypothesis' ? '💡 ' : ''
+  let body = n.body || ''
+  if (n.url) body += `${body ? '\n\n' : ''}[${n.url}](${n.url})`
+  return { kind: 'note', title: (icon + (n.title || '')).slice(0, 100), body, ...dims }
 }
 function createOrchNodes(editor: Editor, nodes: OrchNodeSpec[]): void {
   if (!nodes?.length) return
-  const vb = editor.getViewportPageBounds()
-  const startX = vb.x + 60
-  const startY = vb.y + 60
-  const COL_W = 380
   const GAP_X = 60
   const GAP_Y = 28
+  // Кладём СПРАВА от всех уже существующих нод (иначе разные пачки — статьи ресерча и
+  // веб-сборка — накладываются друг на друга). Если холст пуст — от угла вьюпорта.
+  let startX: number
+  let startY: number
+  const existing = editor.getCurrentPageShapes().filter((s) => s.type === 'flow-node')
+  if (existing.length) {
+    let maxX = -Infinity
+    let minY = Infinity
+    for (const s of existing) {
+      const b = editor.getShapePageBounds(s.id)
+      if (b) {
+        maxX = Math.max(maxX, b.maxX)
+        minY = Math.min(minY, b.y)
+      }
+    }
+    startX = (isFinite(maxX) ? maxX : editor.getViewportPageBounds().x) + 140
+    startY = isFinite(minY) ? minY : editor.getViewportPageBounds().y + 60
+  } else {
+    const vb = editor.getViewportPageBounds()
+    startX = vb.x + 60
+    startY = vb.y + 60
+  }
   const byFacet = new Map<string, OrchNodeSpec[]>()
   for (const n of nodes) {
     const f = n.facet || 'Прочее'
@@ -88,9 +258,10 @@ function createOrchNodes(editor: Editor, nodes: OrchNodeSpec[]): void {
     byFacet.get(f)!.push(n)
   }
   const created: ReturnType<typeof createShapeId>[] = []
-  let col = 0
+  let x = startX
   for (const [facet, items] of byFacet) {
-    const x = startX + col * (COL_W + GAP_X)
+    // Ширина столбца = максимум ширины его нод (чтобы широкие канбаны/таблицы не наезжали).
+    const colW = Math.max(380, ...items.map((n) => orchDims(n.kind).w))
     let y = startY
     // Заголовок грани
     const hid = createShapeId()
@@ -99,28 +270,18 @@ function createOrchNodes(editor: Editor, nodes: OrchNodeSpec[]): void {
       type: 'flow-node',
       x,
       y,
-      props: { kind: 'note', title: `🗂 ${facet}`, body: '', w: COL_W, h: 60 }
+      props: { kind: 'note', title: `🗂 ${facet}`, body: '', w: colW, h: 60 }
     })
     created.push(hid)
     y += 60 + GAP_Y
     for (const n of items) {
       const id = createShapeId()
-      const icon = n.kind === 'paper' ? '📄 ' : n.kind === 'hypothesis' ? '💡 ' : n.kind === 'kanban' ? '📋 ' : ''
-      const title = (icon + (n.title || '')).slice(0, 100)
-      let body = n.body || ''
-      if (n.url) body += `${body ? '\n\n' : ''}[${n.url}](${n.url})`
-      const h = n.kind === 'paper' ? 190 : n.kind === 'kanban' ? 420 : 260
-      editor.createShape<FlowNodeShape>({
-        id,
-        type: 'flow-node',
-        x,
-        y,
-        props: { kind: 'note', title, body, w: COL_W, h }
-      })
+      const props = orchShapeProps(n)
+      editor.createShape<FlowNodeShape>({ id, type: 'flow-node', x, y, props: props as never })
       created.push(id)
-      y += h + GAP_Y
+      y += (props.h as number) + GAP_Y
     }
-    col++
+    x += colW + GAP_X
   }
   try {
     if (created.length) editor.select(...created)
@@ -702,6 +863,13 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const [anythingllmKey, setAnythingllmKey] = useState('')
   const [elsTest, setElsTest] = useState<string>('')
   const [elsTesting, setElsTesting] = useState(false)
+  // T2.1: PDF-RAG
+  const [ragHybrid, setRagHybrid] = useState(true)
+  const [ragTopN, setRagTopN] = useState(8)
+  const [ragReranker, setRagReranker] = useState(false)
+  // T2.4: память доски через retrieval
+  const [memoryRetrieval, setMemoryRetrieval] = useState(true)
+  const [memoryContextBudget, setMemoryContextBudget] = useState(4000)
   const testElsevier = async () => {
     setElsTesting(true)
     setElsTest('')
@@ -749,6 +917,11 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
         setElsevierInsttoken(s.elsevierInsttoken || '')
         setUnpaywallEmail(s.unpaywallEmail || '')
         setAnythingllmKey(s.anythingllmKey || '')
+        setRagHybrid(s.ragHybrid !== false)
+        setRagTopN(s.ragTopN || 8)
+        setRagReranker(!!s.ragReranker)
+        setMemoryRetrieval(s.memoryRetrieval !== false)
+        setMemoryContextBudget(s.memoryContextBudget || 4000)
       })
       .catch(() => {})
     window.flow?.mcpList().then(setMcp).catch(() => setMcp([]))
@@ -768,7 +941,7 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 
   const save = async () => {
     await window.flow.saveProviders(providers)
-    await window.flow.saveSettings({ defaultModel, autoStart, comfyCmd, comfyCwd, lmsCmd, elsevierKey, elsevierInsttoken, unpaywallEmail, anythingllmKey })
+    await window.flow.saveSettings({ defaultModel, autoStart, comfyCmd, comfyCwd, lmsCmd, elsevierKey, elsevierInsttoken, unpaywallEmail, anythingllmKey, ragHybrid, ragTopN, ragReranker, memoryRetrieval, memoryContextBudget })
     await window.flow.mcpSave(
       mcp.map(({ id, name, command, args, env, enabled }) => ({ id, name, command, args, env, enabled }))
     )
@@ -944,6 +1117,51 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
             Подсказка: LM Studio — установи CLI и укажи <code>lms server start</code>. ComfyUI — путь к своему .bat-файлу
             запуска. Команды сохрани кнопкой ниже.
           </div>
+
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <div style={{ fontSize: 13, fontWeight: 600 }}>📕 PDF-поиск (RAG)</div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={ragHybrid} onChange={(e) => setRagHybrid(e.currentTarget.checked)} />
+            Гибридный поиск (BM25 + эмбеддинги + RRF)
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>— лучше находит точные термины, аббревиатуры, числа</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text)' }}>
+            Чанков в ответ (top-N):
+            <input
+              className="flow-set-input"
+              type="number"
+              min={1}
+              max={40}
+              value={ragTopN}
+              onChange={(e) => setRagTopN(Math.max(1, Math.min(40, Number(e.currentTarget.value) || 8)))}
+              style={{ width: 72 }}
+            />
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--muted)', cursor: 'not-allowed' }}>
+            <input type="checkbox" checked={ragReranker} disabled onChange={(e) => setRagReranker(e.currentTarget.checked)} />
+            Реранкер (bge-reranker) — скоро, требует загрузки модели
+          </label>
+
+          <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
+          <div style={{ fontSize: 13, fontWeight: 600 }}>🧠 Память доски</div>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text)', cursor: 'pointer' }}>
+            <input type="checkbox" checked={memoryRetrieval} onChange={(e) => setMemoryRetrieval(e.currentTarget.checked)} />
+            Умная память (retrieval)
+            <span style={{ fontSize: 11, color: 'var(--muted)' }}>— подтягивать релевантное, а не всю память (экономит токены)</span>
+          </label>
+          <label style={{ display: 'flex', alignItems: 'center', gap: 8, fontSize: 12.5, color: 'var(--text)' }}>
+            Бюджет памяти (токенов):
+            <input
+              className="flow-set-input"
+              type="number"
+              min={500}
+              max={32000}
+              step={500}
+              value={memoryContextBudget}
+              onChange={(e) => setMemoryContextBudget(Math.max(500, Math.min(32000, Number(e.currentTarget.value) || 4000)))}
+              style={{ width: 90 }}
+            />
+          </label>
 
           <div style={{ height: 1, background: 'var(--border)', margin: '4px 0' }} />
           <div style={{ fontSize: 13, fontWeight: 600 }}>🔬 Научные источники (поиск статей)</div>
@@ -1173,7 +1391,7 @@ function sizeFor(kind: string): { w: number; h: number } {
       : kind === 'orchestrator'
       ? 620
       : kind === 'notebook'
-      ? 600
+      ? 760
       : kind === 'pdf'
       ? 620
       : kind === 'kanban'
@@ -1203,7 +1421,7 @@ function sizeFor(kind: string): { w: number; h: number } {
       : kind === 'orchestrator'
       ? 460
       : kind === 'notebook'
-      ? 640
+      ? 900
       : kind === 'kanban'
       ? 1000
       : kind === 'board'
@@ -1234,6 +1452,422 @@ function sizeFor(kind: string): { w: number; h: number } {
   return { w, h }
 }
 
+const TL_MONTHS = ['Январь', 'Февраль', 'Март', 'Апрель', 'Май', 'Июнь', 'Июль', 'Август', 'Сентябрь', 'Октябрь', 'Ноябрь', 'Декабрь']
+const TL_WD = ['Вс', 'Пн', 'Вт', 'Ср', 'Чт', 'Пт', 'Сб']
+
+// ── Таймлайн доски: бесконечная временная СЕТКА (координатный слой), не ноды ──
+// Ось Y = время: TL_DAY_H пикселей на день. День dayIndex 0 = TL_EPOCH (понедельник),
+// вниз = будущее, вверх = прошлое. Каждый день — горизонтальная полоса во всю ширину;
+// каждая неделя (7 дней) окрашена в свой пастельный тон. Всё бесконечно.
+const TL_DAY_H = 1700 // высота полосы дня (px) — вмещает ~5 нод по вертикали
+const TL_WEEK_W = 4600 // ширина колонки недельных окошек (page px, слева от дневной зоны)
+const TL_MONTH_W = 5600 // ширина колонки месячных окошек (ещё левее)
+// Начало отсчёта времени (dayIndex 0) = ДЕНЬ СОЗДАНИЯ доски. Ставится при загрузке/включении
+// таймлайна через setTlEpoch(boardCreatedMs). До этого — безопасный дефолт.
+let TL_EPOCH_MS = new Date(2024, 0, 1).getTime()
+const tlStartOfDay = (ms: number): number => {
+  const d = new Date(ms)
+  return new Date(d.getFullYear(), d.getMonth(), d.getDate()).getTime()
+}
+const setTlEpoch = (ms: number): void => {
+  TL_EPOCH_MS = tlStartOfDay(ms)
+}
+// Мягкие пастельные тона недель (полупрозрачные — читаемо на тёмной теме).
+const TL_PASTELS = [
+  'rgba(244,114,182,0.11)',
+  'rgba(96,165,250,0.11)',
+  'rgba(74,222,128,0.11)',
+  'rgba(251,191,36,0.11)',
+  'rgba(167,139,250,0.11)',
+  'rgba(45,212,191,0.11)',
+  'rgba(248,113,113,0.11)',
+  'rgba(129,140,248,0.11)'
+]
+const tlPad = (n: number): string => String(n).padStart(2, '0')
+const tlDate = (dayIndex: number): Date => {
+  const d = new Date(TL_EPOCH_MS)
+  d.setDate(d.getDate() + dayIndex)
+  return d
+}
+const tlIso = (dayIndex: number): string => {
+  const d = tlDate(dayIndex)
+  return `${d.getFullYear()}-${tlPad(d.getMonth() + 1)}-${tlPad(d.getDate())}`
+}
+const tlTodayIndex = (): number => Math.round((tlStartOfDay(Date.now()) - TL_EPOCH_MS) / 86400000)
+const mod = (a: number, n: number): number => ((a % n) + n) % n
+// День создания доски (start-of-day). Храним в board_meta (БД, кэш в boardStore); для старых
+// досок пробуем вывести из id вида 'b<base36-timestamp>', иначе — сегодня.
+function boardCreatedMs(boardId: string): number {
+  const stored = bmetaGet(boardId, 'board.createdMs')
+  if (stored) return Number(stored)
+  let ms = Date.now()
+  if (boardId && boardId[0] === 'b') {
+    const t = parseInt(boardId.slice(1), 36)
+    if (t > 1500000000000 && t < 4000000000000) ms = t
+  }
+  const sod = tlStartOfDay(ms)
+  bmetaSet(boardId, 'board.createdMs', String(sod))
+  return sod
+}
+
+// Фон таймлайна. Дневная зона — правая полуплоскость (page x≥0): пастельные полосы-дни
+// (цвет по неделям) с полубесконечными вправо линиями. Слева от неё — колонки недельных
+// и месячных окошек. Ещё левее — пусто (свободная зона, только точки). Всё бесконечно по Y.
+function TimelineBackground(): JSX.Element {
+  const editor = useEditor()
+  const cam = useValue('tl-cam', () => editor.getCamera(), [editor])
+  const vsb = useValue('tl-vsb', () => editor.getViewportScreenBounds(), [editor])
+  const z = cam.z
+  const W = vsb.w
+  const H = vsb.h
+  const sx = (px: number): number => (px + cam.x) * z // page-x → screen-x
+  const sy = (py: number): number => (py + cam.y) * z // page-y → screen-y
+  const dayLeft = sx(0)
+  const weekLeft = sx(-TL_WEEK_W)
+  const monthLeft = sx(-TL_WEEK_W - TL_MONTH_W)
+  // Таймлайн начинается с ДНЯ СОЗДАНИЯ доски (dayIndex 0) — раньше него ничего не рисуем
+  // (выше — пустая свободная зона, только точки).
+  const first = Math.max(0, Math.floor(-cam.y / TL_DAY_H) - 1)
+  const last = Math.ceil((H / z - cam.y) / TL_DAY_H) + 1
+  const todayIdx = tlTodayIndex()
+  const bandLeft = Math.max(dayLeft, 0)
+  const els: JSX.Element[] = []
+  if (last <= first) {
+    return (
+      <div style={{ position: 'absolute', inset: 0, backgroundColor: 'var(--bg)', overflow: 'hidden' }}>
+        <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(var(--grid) 1px, transparent 1px)', backgroundSize: `${24 * z}px ${24 * z}px`, backgroundPosition: `${cam.x * z}px ${cam.y * z}px` }} />
+      </div>
+    )
+  }
+
+  // Полосы-дни + линии — только правее page x=0, полубесконечно вправо.
+  for (let i = first; i < last; i++) {
+    const top = sy(i * TL_DAY_H)
+    const h = TL_DAY_H * z
+    const pastel = TL_PASTELS[mod(Math.floor(i / 7), TL_PASTELS.length)]
+    els.push(
+      <div key={'b' + i} style={{ position: 'absolute', left: bandLeft, top, width: Math.max(0, W - bandLeft), height: h, background: pastel, borderTop: `1px solid ${mod(i, 7) === 0 ? 'rgba(255,255,255,0.16)' : 'rgba(255,255,255,0.05)'}`, boxSizing: 'border-box' }} />
+    )
+    if (h > 18) {
+      const d = tlDate(i)
+      els.push(
+        <div key={'dl' + i} style={{ position: 'absolute', left: Math.max(dayLeft + 10, 4), top: top + 8, font: `600 12px ${SANS}`, color: i === todayIdx ? 'var(--accent)' : 'var(--text)', whiteSpace: 'nowrap', pointerEvents: 'none' }}>
+          {TL_WD[d.getDay()]} {tlPad(d.getDate())}.{tlPad(d.getMonth() + 1)}
+          {i === todayIdx && <span style={{ marginLeft: 8, fontWeight: 700 }}>● сегодня</span>}
+        </div>
+      )
+    }
+  }
+
+  // Недельные окошки (7 дней от понедельника).
+  for (let w = Math.floor(first / 7); w <= Math.floor((last - 1) / 7); w++) {
+    const i0 = w * 7
+    els.push(
+      <div key={'w' + w} style={{ position: 'absolute', left: weekLeft, top: sy(i0 * TL_DAY_H), width: TL_WEEK_W * z, height: 7 * TL_DAY_H * z, boxSizing: 'border-box', border: '1px solid rgba(255,255,255,0.12)', borderRadius: 10 * z, background: 'rgba(148,163,184,0.06)', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+        <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', font: `700 17px ${SANS}`, color: 'var(--text)', whiteSpace: 'nowrap', letterSpacing: '.04em' }}>
+          Неделя {Math.floor(i0 / 7) + 1}
+          <span style={{ color: 'var(--muted)', fontWeight: 500 }}>  ·  {tlPad(tlDate(i0).getDate())}.{tlPad(tlDate(i0).getMonth() + 1)}–{tlPad(tlDate(i0 + 6).getDate())}.{tlPad(tlDate(i0 + 6).getMonth() + 1)}</span>
+        </div>
+      </div>
+    )
+  }
+
+  // Месячные окошки (календарный месяц) — ещё левее.
+  const seenM = new Set<string>()
+  for (let k = first; k < last; k++) {
+    const d = tlDate(k)
+    const key = `${d.getFullYear()}-${d.getMonth()}`
+    if (seenM.has(key)) continue
+    seenM.add(key)
+    const startIdxRaw = k - (d.getDate() - 1)
+    const daysInMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0).getDate()
+    const startIdx = Math.max(startIdxRaw, 0) // первый месяц — не раньше дня создания доски
+    const endIdxExcl = startIdxRaw + daysInMonth
+    els.push(
+      <div key={'m' + key} style={{ position: 'absolute', left: monthLeft, top: sy(startIdx * TL_DAY_H), width: TL_MONTH_W * z, height: (endIdxExcl - startIdx) * TL_DAY_H * z, boxSizing: 'border-box', border: '1px solid rgba(255,255,255,0.15)', borderRadius: 12 * z, background: 'rgba(100,116,139,0.10)', display: 'grid', placeItems: 'center', overflow: 'hidden' }}>
+        <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', font: `800 22px ${SANS}`, color: 'var(--text)', whiteSpace: 'nowrap', letterSpacing: '.05em', textTransform: 'uppercase' }}>{TL_MONTHS[d.getMonth()]} {d.getFullYear()}</div>
+      </div>
+    )
+  }
+
+  return (
+    <div style={{ position: 'absolute', inset: 0, backgroundColor: 'var(--bg)', overflow: 'hidden' }}>
+      <div style={{ position: 'absolute', inset: 0, backgroundImage: 'radial-gradient(var(--grid) 1px, transparent 1px)', backgroundSize: `${24 * z}px ${24 * z}px`, backgroundPosition: `${cam.x * z}px ${cam.y * z}px` }} />
+      {els}
+    </div>
+  )
+}
+
+// Плавающая панель таймлайна: действует на день в центре вьюпорта. Ручная выжимка +
+// удаление (сжатие) пустых дня/недели/месяца — сдвигает всё, что ниже, вверх на длину периода.
+function TimelineDigestPanel({ editor, boardId, onToast }: { editor: Editor; boardId: string; onToast: (m: string) => void }): JSX.Element {
+  const vpb = useValue('tl-vpb', () => editor.getViewportPageBounds(), [editor])
+  const centerY = vpb.y + vpb.h / 2
+  const dayIdx = Math.max(0, Math.floor(centerY / TL_DAY_H)) // не раньше дня создания доски
+  const date = tlDate(dayIdx)
+  const [busy, setBusy] = useState(false)
+
+  const runDigest = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    onToast('Собираю выжимку дня…')
+    try {
+      const r = await digestDayRange(editor, boardId, dayIdx * TL_DAY_H, (dayIdx + 1) * TL_DAY_H, tlIso(dayIdx))
+      if (r.ok) onToast('Выжимка дня добавлена в память доски ✓')
+      else if (r.empty) onToast('В этом дне нет контента для выжимки')
+      else onToast('Ошибка выжимки: ' + (r.error || ''))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  // Пусто ли [startIdx, startIdx+span) по контенту (без служебных нод).
+  const rangeEmpty = (startIdx: number, span: number): boolean => {
+    const yTop = startIdx * TL_DAY_H
+    const yBot = (startIdx + span) * TL_DAY_H
+    return !editor.getCurrentPageShapes().some((s) => {
+      if (s.type !== 'flow-node') return false
+      const k = (s as FlowNodeShape).props.kind
+      if (k === 'boardmem' || k === 'daylane' || k === 'tlaxis') return false
+      const b = editor.getShapePageBounds(s.id)
+      if (!b) return false
+      const cy = b.y + b.h / 2
+      return cy >= yTop && cy < yBot
+    })
+  }
+  // Удалить пустой период: сдвинуть всё ниже него вверх на span дней (убрать пустое время).
+  const collapse = (startIdx: number, span: number, label: string): void => {
+    if (!rangeEmpty(startIdx, span)) {
+      onToast(`${label} не пуст — сначала перенеси/удали его ноды`)
+      return
+    }
+    const yBot = (startIdx + span) * TL_DAY_H
+    const shift = span * TL_DAY_H
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const updates: any[] = []
+    for (const s of editor.getCurrentPageShapes()) {
+      const b = editor.getShapePageBounds(s.id)
+      if (!b) continue
+      if (b.y + b.h / 2 >= yBot) updates.push({ id: s.id, type: s.type, y: (s as unknown as { y: number }).y - shift })
+    }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    if (updates.length) editor.updateShapes(updates as any)
+    onToast(`${label} удалён — ниже сдвинуто на ${span} дн.${updates.length ? '' : ' (ничего ниже не было)'}`)
+  }
+
+  const wkStart = Math.floor(dayIdx / 7) * 7
+  const mStart = dayIdx - (date.getDate() - 1)
+  const dim = new Date(date.getFullYear(), date.getMonth() + 1, 0).getDate()
+  const isToday = dayIdx === tlTodayIndex()
+  const divider = <span style={{ width: 1, height: 15, background: 'var(--border)', flexShrink: 0 }} />
+
+  return (
+    <div
+      style={{
+        position: 'absolute',
+        left: 12,
+        bottom: 12,
+        zIndex: 40,
+        display: 'flex',
+        alignItems: 'center',
+        gap: 9,
+        background: 'color-mix(in srgb, var(--panel) 85%, transparent)',
+        border: '1px solid var(--border)',
+        borderRadius: 9,
+        padding: '5px 11px',
+        boxShadow: '0 4px 16px rgba(0,0,0,0.22)',
+        backdropFilter: 'blur(7px)',
+        fontFamily: SANS
+      }}
+    >
+      <style>{`
+        .tl-btn{background:none;border:none;padding:0;margin:0;cursor:pointer;font:500 11.5px ${SANS};color:var(--muted);transition:color .12s;white-space:nowrap}
+        .tl-btn:disabled{cursor:default;opacity:.55}
+        .tl-act{color:var(--text);font-weight:600}
+        .tl-act:hover:not(:disabled){color:var(--accent)}
+        .tl-del:hover{color:#e79595}
+      `}</style>
+      <span style={{ fontSize: 11.5, color: 'var(--muted)', whiteSpace: 'nowrap', letterSpacing: '.01em' }}>
+        <b style={{ color: isToday ? 'var(--accent)' : 'var(--text)', fontWeight: 600 }}>
+          {TL_WD[date.getDay()]} {tlPad(date.getDate())}.{tlPad(date.getMonth() + 1)}
+        </b>
+        <span style={{ margin: '0 5px', opacity: 0.4 }}>·</span>Н{Math.floor(dayIdx / 7) + 1}
+      </span>
+      {divider}
+      <button className="tl-btn tl-act" onClick={runDigest} disabled={busy} title="Собрать выжимку контента дня (в центре экрана) в память доски">
+        {busy ? 'сбор…' : 'Выжимка дня'}
+      </button>
+      {divider}
+      <span style={{ fontSize: 11, color: 'var(--muted)', opacity: 0.6 }}>очистить</span>
+      <button className="tl-btn tl-del" onClick={() => collapse(dayIdx, 1, 'День')} title="Удалить (сжать) день, если он пуст">
+        день
+      </button>
+      <button className="tl-btn tl-del" onClick={() => collapse(wkStart, 7, 'Неделя')} title="Удалить (сжать) неделю, если она пуста">
+        нед
+      </button>
+      <button className="tl-btn tl-del" onClick={() => collapse(mStart, dim, 'Месяц')} title="Удалить (сжать) месяц, если он пуст">
+        мес
+      </button>
+    </div>
+  )
+}
+
+// Прочитать File → base64 (без data-URL префикса).
+function fileToBase64(file: File): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader()
+    r.onload = () => resolve(String(r.result).split(',')[1] || '')
+    r.onerror = () => reject(new Error('read error'))
+    r.readAsDataURL(file)
+  })
+}
+
+// Диалог при дропе текстовых файлов: класть ли их в RAG (базу знаний AnythingLLM) и в
+// какой проект (workspace). Ноды на доску создаются в любом случае — RAG опционален.
+function RagDropModal({
+  files,
+  onClose,
+  onConfirm
+}: {
+  files: File[]
+  onClose: () => void
+  onConfirm: (opts: { rag: boolean; workspace: string }) => void
+}): JSX.Element {
+  const [workspaces, setWorkspaces] = useState<Array<{ name: string; slug: string }> | null>(null)
+  const [wsErr, setWsErr] = useState('')
+  const [ws, setWs] = useState<string>(() => localStorage.getItem('flow-rag-project') || 'Flow')
+  const [creating, setCreating] = useState(false)
+  const [newWs, setNewWs] = useState('')
+
+  useEffect(() => {
+    let alive = true
+    window.flow?.anythingWorkspaces?.().then((r) => {
+      if (!alive) return
+      if (r?.ok && r.workspaces) {
+        setWorkspaces(r.workspaces)
+        // если сохранённого проекта нет в списке — добавим его как вариант
+        if (r.workspaces.length && !r.workspaces.some((w) => w.name === ws) && ws !== 'Flow') setCreating(false)
+      } else {
+        setWsErr(r?.error || 'AnythingLLM недоступен')
+      }
+    })
+    return () => {
+      alive = false
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const resolveWs = (): string => (creating ? newWs.trim() : ws) || 'Flow'
+  const confirm = (rag: boolean): void => {
+    const workspace = resolveWs()
+    if (rag) localStorage.setItem('flow-rag-project', workspace)
+    onConfirm({ rag, workspace })
+  }
+
+  const fieldStyle: React.CSSProperties = {
+    background: 'var(--panel2)',
+    border: '1px solid var(--border)',
+    borderRadius: 8,
+    color: 'var(--text)',
+    fontSize: 13,
+    padding: '8px 10px',
+    fontFamily: SANS,
+    outline: 'none',
+    width: '100%'
+  }
+
+  return (
+    <div
+      onClick={onClose}
+      style={{ position: 'fixed', inset: 0, zIndex: 90, background: 'rgba(0,0,0,0.5)', display: 'grid', placeItems: 'center' }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: 440,
+          maxWidth: '92vw',
+          background: 'var(--panel)',
+          border: '1px solid var(--border)',
+          borderRadius: 16,
+          boxShadow: '0 24px 60px rgba(0,0,0,0.5)',
+          padding: 20,
+          fontFamily: SANS,
+          color: 'var(--text)'
+        }}
+      >
+        <div style={{ font: `600 15px ${SANS}`, marginBottom: 4 }}>Добавить в базу знаний (RAG)?</div>
+        <div style={{ font: `400 12px ${SANS}`, color: 'var(--muted)', marginBottom: 14 }}>
+          {files.length} файл(ов) лягут нодами на доску. Выбери, класть ли их в RAG и в какой проект.
+        </div>
+
+        <div style={{ maxHeight: 96, overflow: 'auto', marginBottom: 14, display: 'flex', flexDirection: 'column', gap: 4 }}>
+          {files.map((f, i) => (
+            <div key={i} style={{ font: `400 12px ${MONO}`, color: 'var(--muted)', whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+              📄 {f.name}
+            </div>
+          ))}
+        </div>
+
+        <div style={{ font: `600 11px ${MONO}`, color: 'var(--muted)', letterSpacing: '.06em', marginBottom: 6 }}>ПРОЕКТ (ХРАНИЛИЩЕ RAG)</div>
+        {creating ? (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+            <input
+              autoFocus
+              value={newWs}
+              onChange={(e) => setNewWs(e.currentTarget.value)}
+              placeholder="Имя нового проекта…"
+              style={fieldStyle}
+            />
+            <button onClick={() => setCreating(false)} style={{ ...fieldStyle, width: 'auto', cursor: 'pointer', color: 'var(--muted)' }} title="К списку">
+              ↩
+            </button>
+          </div>
+        ) : (
+          <div style={{ display: 'flex', gap: 6, marginBottom: 6 }}>
+            <select value={ws} onChange={(e) => setWs(e.currentTarget.value)} style={{ ...fieldStyle, cursor: 'pointer' }}>
+              {(workspaces && workspaces.length ? workspaces.map((w) => w.name) : Array.from(new Set(['Flow', ws]))).map((name) => (
+                <option key={name} value={name}>
+                  {name}
+                </option>
+              ))}
+            </select>
+            <button
+              onClick={() => {
+                setCreating(true)
+                setNewWs('')
+              }}
+              style={{ ...fieldStyle, width: 'auto', cursor: 'pointer', color: 'var(--accent)', whiteSpace: 'nowrap' }}
+              title="Создать новый проект"
+            >
+              ＋ Новый
+            </button>
+          </div>
+        )}
+        {wsErr && (
+          <div style={{ font: `400 11px ${SANS}`, color: '#F0A83A', marginBottom: 6 }}>
+            {wsErr} — можно указать имя проекта, он создастся при заливке.
+          </div>
+        )}
+
+        <div style={{ display: 'flex', gap: 8, justifyContent: 'flex-end', marginTop: 16 }}>
+          <button
+            onClick={() => confirm(false)}
+            style={{ border: '1px solid var(--border)', background: 'var(--panel2)', color: 'var(--text)', borderRadius: 9, fontSize: 13, padding: '9px 14px', cursor: 'pointer', fontFamily: SANS }}
+          >
+            Только на доску
+          </button>
+          <button
+            onClick={() => confirm(true)}
+            style={{ border: 'none', background: 'var(--accent)', color: '#04121f', fontWeight: 700, borderRadius: 9, fontSize: 13, padding: '9px 16px', cursor: 'pointer', fontFamily: SANS }}
+          >
+            На доску + в RAG
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function App() {
   const [editor, setEditor] = useState<Editor | null>(null)
   const [theme, setTheme] = useState<ThemeName>(() => {
@@ -1260,6 +1894,95 @@ export default function App() {
   const [boardMenu, setBoardMenu] = useState(false)
   const importInputRef = useRef<HTMLInputElement>(null)
   const board = boards.find((b) => b.id === currentBoardId) || boards[0]
+  // Таймлайн-режим доски (бесконечная временная сетка) — свой флаг у каждой доски.
+  const [timelineOn, setTimelineOn] = useState<boolean>(false)
+  useEffect(() => {
+    let cancelled = false
+    ;(async () => {
+      // Одноразовая миграция localStorage → БД (идемпотентна), затем гидратация доски.
+      await migrateLocalStorageToDb()
+      await hydrateBoard(currentBoardId)
+      if (cancelled) return
+      setTlEpoch(boardCreatedMs(currentBoardId)) // отсчёт дней — от дня создания доски
+      setTimelineOn(bmetaGet(currentBoardId, 'timeline.on') === '1')
+    })()
+    return () => {
+      cancelled = true
+    }
+  }, [currentBoardId])
+
+  // АВТО-выгрузка памяти: прошедшие дни (< сегодня) с контентом, но без записи в памяти —
+  // автоматически суммаризуем (по ≤2 за проход, свежие раньше). При включении + каждые 10 мин.
+  useEffect(() => {
+    if (!timelineOn || !editor) return
+    let stopped = false
+    const runAuto = async (): Promise<void> => {
+      if (stopped) return
+      const today = tlTodayIndex()
+      const have = new Set(readBoardMem(currentBoardId).map((e) => e.date))
+      const shapes = editor.getCurrentPageShapes()
+      const hasContent = (i: number): boolean => {
+        const yTop = i * TL_DAY_H
+        const yBot = (i + 1) * TL_DAY_H
+        return shapes.some((s) => {
+          if (s.type !== 'flow-node') return false
+          const k = (s as FlowNodeShape).props.kind
+          if (k === 'boardmem' || k === 'daylane' || k === 'tlaxis') return false
+          const b = editor.getShapePageBounds(s.id)
+          if (!b) return false
+          const cy = b.y + b.h / 2
+          return cy >= yTop && cy < yBot
+        })
+      }
+      const todo: number[] = []
+      for (let i = today - 1; i >= today - 21 && todo.length < 2; i--) {
+        if (have.has(tlIso(i))) continue
+        if (hasContent(i)) todo.push(i)
+      }
+      for (const i of todo) {
+        if (stopped) break
+        const r = await digestDayRange(editor, currentBoardId, i * TL_DAY_H, (i + 1) * TL_DAY_H, tlIso(i))
+        if (r.ok) showToast('🧠 Авто-память: день ' + tlIso(i) + ' выгружен')
+      }
+      if (stopped) return
+      const keys = new Set(readBoardMem(currentBoardId).map((e) => e.date))
+      // Сводка ЗАВЕРШЁННОЙ недели (все 7 дней < сегодня).
+      const wLast = Math.floor((today - 1) / 7)
+      const wEnd = wLast * 7 + 6
+      if (wEnd < today) {
+        const wKey = tlIso(wEnd) + ' · неделя ' + (wLast + 1)
+        if (!keys.has(wKey)) {
+          const wDates: string[] = []
+          for (let k = wLast * 7; k <= wEnd; k++) wDates.push(tlIso(k))
+          const r = await rollupMemory(currentBoardId, 'week', wKey, 'неделю ' + (wLast + 1), wDates)
+          if (r.ok) showToast('🧠 Авто-память: сводка недели ' + (wLast + 1))
+        }
+      }
+      if (stopped) return
+      // Сводка ЗАВЕРШЁННОГО месяца (все дни < сегодня).
+      const dY = tlDate(today - 1)
+      const mStart = today - 1 - (dY.getDate() - 1)
+      const dim = new Date(dY.getFullYear(), dY.getMonth() + 1, 0).getDate()
+      const mEnd = mStart + dim - 1
+      if (mEnd < today) {
+        const mKey = tlIso(mEnd) + ' · ' + TL_MONTHS[dY.getMonth()] + ' ' + dY.getFullYear()
+        if (!keys.has(mKey)) {
+          const mDates: string[] = []
+          for (let k = mStart; k <= mEnd; k++) mDates.push(tlIso(k))
+          const r = await rollupMemory(currentBoardId, 'month', mKey, TL_MONTHS[dY.getMonth()] + ' ' + dY.getFullYear(), mDates)
+          if (r.ok) showToast('🧠 Авто-память: сводка месяца')
+        }
+      }
+    }
+    const t = setTimeout(runAuto, 4000) // немного после открытия
+    const iv = setInterval(runAuto, 10 * 60 * 1000)
+    return () => {
+      stopped = true
+      clearTimeout(t)
+      clearInterval(iv)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [timelineOn, editor, currentBoardId])
   // URL sync-сервера (общий для всех досок этого устройства). По умолчанию —
   // задеплоенный воркер владельца; можно сменить через «⚙ Сервер синхронизации».
   const [syncServer, setSyncServer] = useState<string>(
@@ -1314,6 +2037,11 @@ export default function App() {
       if (res.updatedAt > (syncStamps.current[key] ?? 0)) {
         suppressSave.current = true
         loadSnapshot(ed.store, res.snapshot as never)
+        try {
+          migrateBoardExtras(ed) // T1.2: миграция/детект повреждённых extra после загрузки
+        } catch {
+          /* миграция не должна ронять загрузку */
+        }
         syncStamps.current[key] = res.updatedAt
         persistStamps()
         setTimeout(() => {
@@ -1336,6 +2064,12 @@ export default function App() {
         if (r && r.ok) {
           syncStamps.current[key] = ts
           persistStamps()
+        }
+        // T4.1: переиндексировать доску для глобального поиска (целиком — удалённые ноды выпадают).
+        try {
+          window.flow?.nodes?.reindex({ boardId: key, boardName: name, nodes: buildNodeIndex(ed) })
+        } catch {
+          /* индексация не критична */
         }
       } catch {
         /* ignore */
@@ -1402,6 +2136,21 @@ export default function App() {
       const bKey = b.key
       const bName = b.name
       setTimeout(() => pullCanvas(ed, bKey), 700)
+      // T1.2: подстраховка для локальных досок без удалённого снапшота — прогнать
+      // миграцию/детект повреждённых extra после того, как стор наполнится.
+      setTimeout(() => {
+        try {
+          migrateBoardExtras(ed)
+        } catch {
+          /* не критично */
+        }
+        // T4.1: индексируем доску при открытии (чтобы её ноды искались и без правок).
+        try {
+          window.flow?.nodes?.reindex({ boardId: bKey, boardName: bName, nodes: buildNodeIndex(ed) })
+        } catch {
+          /* не критично */
+        }
+      }, 1500)
       try {
         ed.store.listen(() => scheduleSaveCanvas(ed, bKey, bName), { source: 'user', scope: 'document' })
       } catch {
@@ -1498,9 +2247,41 @@ export default function App() {
   const newBoard = () => {
     const id = 'b' + Date.now().toString(36)
     const b: Board = { id, name: `Доска ${boards.length + 1}`, key: 'flow-board-' + id }
+    bmetaSet(id, 'board.createdMs', String(tlStartOfDay(Date.now()))) // день создания доски
     setBoards((x) => [...x, b])
     setCurrentBoardId(id)
     setBoardMenu(false)
+  }
+  // Вкл/выкл таймлайн-режим доски. При включении: создаём ноду «Память доски» (если нет)
+  // и переносим камеру на сегодняшний день.
+  const toggleTimeline = () => {
+    setTlEpoch(boardCreatedMs(currentBoardId)) // отсчёт от дня создания доски
+    const next = !timelineOn
+    setTimelineOn(next)
+    bmetaSet(currentBoardId, 'timeline.on', next ? '1' : '0')
+    setBoardMenu(false)
+    if (next && editor) {
+      const hasMem = editor.getCurrentPageShapes().some((s) => s.type === 'flow-node' && (s as FlowNodeShape).props.kind === 'boardmem')
+      if (!hasMem) {
+        const memId = createShapeId()
+        const todayY = tlTodayIndex() * TL_DAY_H
+        editor.createShape<FlowNodeShape>({
+          id: memId,
+          type: 'flow-node',
+          x: -(TL_WEEK_W + TL_MONTH_W) - 640, // в свободной зоне, левее месячных окошек
+          y: todayY,
+          props: { kind: 'boardmem', title: 'Память доски', extra: JSON.stringify({ boardId: currentBoardId }), w: 560, h: 420 }
+        })
+      }
+      try {
+        editor.setCamera({ x: 40, y: -(tlTodayIndex() * TL_DAY_H) + 80, z: 0.55 }, { animation: { duration: 400 } })
+      } catch {
+        /* ignore */
+      }
+      showToast('🗓 Таймлайн включён — прокрути вниз/вверх: дни бесконечны, недели окрашены')
+    } else {
+      showToast('🗓 Таймлайн выключен')
+    }
   }
   const renameBoard = (name: string) =>
     setBoards((x) => x.map((b) => (b.id === currentBoardId ? { ...b, name } : b)))
@@ -1515,6 +2296,7 @@ export default function App() {
       delete syncStamps.current[gone.key]
       persistStamps()
       window.flow?.canvasRemove({ key: gone.key })
+      window.flow?.nodes?.deleteBoard({ boardId: gone.key }) // T4.1: убрать из поискового индекса
     }
   }
 
@@ -1593,6 +2375,8 @@ export default function App() {
 
   // Оверлеи
   const [cmdkOpen, setCmdkOpen] = useState(false)
+  // T4.1: отложенный фокус на ноду после переключения доски (доска грузится асинхронно).
+  const pendingFocus = useRef<{ boardId: string; shapeId?: string; wantMem?: boolean } | null>(null)
   const [ragOpen, setRagOpen] = useState(false)
   const [graphOpen, setGraphOpen] = useState(false)
   const [agentsOpen, setAgentsOpen] = useState(false)
@@ -1719,7 +2503,7 @@ export default function App() {
 
   // Создание ноды из файла, брошенного на холст (фото → ref, PDF/Word/PPTX/текст → doc)
   const addFileNode = useCallback(
-    (file: File, screenPt: { x: number; y: number }, idx: number) => {
+    (file: File, screenPt: { x: number; y: number }, idx: number, opts?: { noRag?: boolean }) => {
       if (!editor) return
       const IMG = /\.(png|jpe?g|gif|webp|bmp|svg|avif|heic|heif|ico|tiff?)$/i
       const PDF = /\.pdf$/i
@@ -1750,7 +2534,7 @@ export default function App() {
           const id = 'pdf_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 8)
           try {
             const imp = await window.flow.pdfImport({ base64, id })
-            if (imp.ok) mkNode('pdf', { extra: JSON.stringify({ pdfId: id, name: file.name }) }, file.name)
+            if (imp.ok) mkNode('pdf', { extra: JSON.stringify({ pdfId: id, name: file.name, noRag: opts?.noRag || undefined }) }, file.name)
             else mkNode('doc', { body: `[Не удалось сохранить PDF: ${imp.error}]` }, file.name)
           } catch (e) {
             mkNode('doc', { body: `[Ошибка PDF «${file.name}»: ${String(e)}]` }, file.name)
@@ -1781,11 +2565,48 @@ export default function App() {
     [editor]
   )
 
+  // Текстовые файлы (статьи и пр.), для которых предлагаем выбор «в RAG / в какой проект».
+  const RAG_TEXT = /\.(pdf|docx|pptx|txt|md|markdown|rtf)$/i
   const dropFiles = useCallback(
     (files: FileList, screenPt: { x: number; y: number }) => {
-      Array.from(files).forEach((f, i) => addFileNode(f, screenPt, i))
+      const arr = Array.from(files)
+      const textFiles = arr.filter((f) => RAG_TEXT.test(f.name))
+      const others = arr.filter((f) => !RAG_TEXT.test(f.name))
+      // Не-текстовые (картинки/таблицы) — сразу нодами.
+      others.forEach((f, i) => addFileNode(f, screenPt, i))
+      // Текстовые — через диалог выбора RAG/проекта (ноды создаст обработчик подтверждения).
+      if (textFiles.length) setRagDrop({ files: textFiles, screenPt })
     },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
     [addFileNode]
+  )
+
+  // Диалог выбора RAG при дропе текстовых файлов.
+  const [ragDrop, setRagDrop] = useState<{ files: File[]; screenPt: { x: number; y: number } } | null>(null)
+  const handleRagDrop = useCallback(
+    async (opts: { rag: boolean; workspace: string }) => {
+      const pending = ragDrop
+      setRagDrop(null)
+      if (!pending) return
+      // Ноды на доску — всегда. Если выбрано «без RAG» — помечаем PDF noRag, чтобы он
+      // НЕ индексировался локально (не эмбеддился). В RAG (AnythingLLM) — только при opts.rag ниже.
+      pending.files.forEach((f, i) => addFileNode(f, pending.screenPt, i, { noRag: !opts.rag }))
+      if (!opts.rag) return
+      showToast(`Заливаю ${pending.files.length} файл(ов) в RAG «${opts.workspace}»…`)
+      let ok = 0
+      for (const f of pending.files) {
+        try {
+          const base64 = await fileToBase64(f)
+          const r = await window.flow.anythingIngest({ base64, name: f.name, workspace: opts.workspace })
+          if (r.ok) ok++
+        } catch {
+          /* ignore single-file failure */
+        }
+      }
+      showToast(ok === pending.files.length ? `В RAG «${opts.workspace}» добавлено ${ok} файл(ов) ✓` : `В RAG «${opts.workspace}»: ${ok}/${pending.files.length} (проверь AnythingLLM/ключ)`)
+    },
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [ragDrop, addFileNode]
   )
 
   // ⌘K и Escape
@@ -1829,6 +2650,99 @@ export default function App() {
       editor.zoomToBounds(b, { inset: 48, animation: { duration: 250 } })
     }
   }, [editor])
+
+  // T4.1: сфокусировать/центрировать камеру на ноде (с подсветкой-выделением).
+  const focusShape = useCallback((ed: Editor, shapeId: string): boolean => {
+    try {
+      const sid = shapeId as TLShapeId
+      const b = ed.getShapePageBounds(sid)
+      if (!b) return false
+      ed.setSelectedShapes([sid])
+      ed.zoomToBounds(b, { inset: 80, animation: { duration: 300 } })
+      return true
+    } catch {
+      return false
+    }
+  }, [])
+
+  // T4.1: переход по результату глобального поиска.
+  const handleSearchNav = useCallback(
+    (t: SearchNav) => {
+      if (t.type === 'command') {
+        t.run()
+        return
+      }
+      if (t.type === 'transcript') {
+        if (!editor || !focusShape(editor, t.shapeId)) showToast('Этот чат — на другой доске, открой её вручную')
+        return
+      }
+      const target = boards.find((b) => b.key === t.boardId || b.id === t.boardId)
+      const targetId = target?.id
+      if (!targetId) {
+        showToast('Доска не найдена')
+        return
+      }
+      if (t.type === 'node') {
+        if (targetId === currentBoardId) {
+          if (editor) focusShape(editor, t.shapeId)
+        } else {
+          pendingFocus.current = { boardId: targetId, shapeId: t.shapeId }
+          setCurrentBoardId(targetId)
+        }
+        return
+      }
+      // t.type === 'memory'
+      const focusMem = (ed: Editor): boolean => {
+        const mem = ed
+          .getCurrentPageShapes()
+          .find((s) => s.type === 'flow-node' && (s as FlowNodeShape).props.kind === 'boardmem')
+        if (mem) return focusShape(ed, String(mem.id))
+        return false
+      }
+      if (targetId === currentBoardId) {
+        if (editor && !focusMem(editor)) showToast('Включи «🗓 Таймлайн доски», чтобы увидеть ноду памяти')
+      } else {
+        pendingFocus.current = { boardId: targetId, wantMem: true }
+        setCurrentBoardId(targetId)
+      }
+    },
+    [boards, currentBoardId, editor, focusShape, showToast]
+  )
+
+  // T4.1: после переключения доски дождаться загрузки снапшота и сфокусировать ноду.
+  useEffect(() => {
+    if (!editor || !pendingFocus.current) return
+    const target = pendingFocus.current
+    if (target.boardId !== currentBoardId) return
+    let tries = 0
+    let stopped = false
+    const tick = (): void => {
+      if (stopped || !pendingFocus.current) return
+      if (target.shapeId) {
+        if (focusShape(editor, target.shapeId)) {
+          pendingFocus.current = null
+          return
+        }
+      } else if (target.wantMem) {
+        const mem = editor
+          .getCurrentPageShapes()
+          .find((s) => s.type === 'flow-node' && (s as FlowNodeShape).props.kind === 'boardmem')
+        if (mem) {
+          focusShape(editor, String(mem.id))
+          pendingFocus.current = null
+          return
+        }
+      }
+      tries++
+      if (tries < 20) setTimeout(tick, 150)
+      else pendingFocus.current = null
+    }
+    const t0 = setTimeout(tick, 250)
+    return () => {
+      stopped = true
+      clearTimeout(t0)
+    }
+  }, [editor, currentBoardId, focusShape])
 
   // Горячая клавиша Shift+F (через e.code — работает и в русской раскладке).
   // Capture-фаза, чтобы сработать раньше инструмента tldraw; не мешаем вводу текста.
@@ -1916,7 +2830,7 @@ export default function App() {
   const components: TLComponents = useMemo(
     () =>
       ({
-        Background: DotGridBackground,
+        Background: timelineOn ? TimelineBackground : DotGridBackground,
         StylePanel: CollapsibleStylePanel,
         PageMenu: null,
         NavigationPanel: null,
@@ -1934,7 +2848,7 @@ export default function App() {
         Minimap: null,
         KeyboardShortcutsDialog: null
       }) as TLComponents,
-    []
+    [timelineOn]
   )
 
   // Элемент раздвижного сайдбара: иконка (+ подпись, когда панель развёрнута).
@@ -2300,6 +3214,14 @@ export default function App() {
                     ⬆ Импорт
                   </button>
                 </div>
+                <button
+                  className="os-btn"
+                  onClick={toggleTimeline}
+                  style={boardMenuBtn(timelineOn ? '#34D399' : '#64748B')}
+                  title="Бесконечная временная сетка: каждый день — горизонтальная полоса во всю ширину, неделя своим пастельным цветом. Прокрутка вверх/вниз — прошлое/будущее."
+                >
+                  🗓 Таймлайн доски: {timelineOn ? 'вкл ✓' : 'выкл'}
+                </button>
 
                 {/* Real-time совместная работа */}
                 <div style={{ height: 1, background: 'var(--border)', margin: '2px 0' }} />
@@ -2362,7 +3284,13 @@ export default function App() {
       <StatusBar editor={editor} theme={theme} setTheme={setTheme} />
 
       {/* Оверлеи */}
-      <CmdK open={cmdkOpen} onClose={() => setCmdkOpen(false)} commands={commands} />
+      <GlobalSearch
+        open={cmdkOpen}
+        onClose={() => setCmdkOpen(false)}
+        commands={commands}
+        onNavigate={handleSearchNav}
+        searchTranscripts={searchTranscripts}
+      />
       <RagModal open={ragOpen} onClose={() => setRagOpen(false)} onToast={showToast} />
       <GraphOverlay open={graphOpen} onClose={() => setGraphOpen(false)} />
       <AgentsStudio open={agentsOpen} onClose={() => setAgentsOpen(false)} onToast={showToast} />
@@ -2481,6 +3409,10 @@ export default function App() {
             </div>
           )
         })()}
+
+      {ragDrop && <RagDropModal files={ragDrop.files} onClose={() => setRagDrop(null)} onConfirm={handleRagDrop} />}
+
+      {timelineOn && editor && <TimelineDigestPanel editor={editor} boardId={currentBoardId} onToast={showToast} />}
 
       <Toast text={toast} />
     </div>

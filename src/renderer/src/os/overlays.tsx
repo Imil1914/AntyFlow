@@ -2,6 +2,7 @@
 // Студия агентов, Генеративная студия, Мобильный (туннельный) вид, Тост.
 // Разметка и поведение — 1:1 из макета ос/Персональная ОС.dc.html.
 import { useEffect, useRef, useState, type CSSProperties } from 'react'
+import type { NodeSearchHit, MemorySearchHit } from '../flow-api'
 
 const MONO = "'JetBrains Mono', monospace"
 const SANS = "'IBM Plex Sans', sans-serif"
@@ -172,6 +173,353 @@ export function CmdK({
           {!items.length && (
             <div style={{ padding: '9px 11px', font: `400 12.5px ${SANS}`, color: 'var(--muted)' }}>
               Ничего не найдено
+            </div>
+          )}
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ─────────────────────────────────────────────────────────────
+// Глобальный поиск (Ctrl+K) — T4.1: ноды/память/транскрипты всех досок + команды
+// ─────────────────────────────────────────────────────────────
+export type SearchNav =
+  | { type: 'node'; boardId: string; shapeId: string }
+  | { type: 'memory'; boardId: string }
+  | { type: 'transcript'; shapeId: string }
+  | { type: 'command'; run: () => void }
+
+type SearchTab = 'all' | 'nodes' | 'memory' | 'transcripts' | 'commands'
+const SEARCH_RECENT_LS = 'flow-search-recent'
+
+// Подсветка сниппета: FTS оборачивает совпадения в [ … ] — превращаем в <mark>.
+function Snippet({ text }: { text: string }) {
+  const parts = text.split(/(\[[^\]]*\])/g)
+  return (
+    <>
+      {parts.map((p, i) =>
+        p.startsWith('[') && p.endsWith(']') ? (
+          <mark key={i} style={{ background: 'rgba(56,189,248,.28)', color: 'var(--text)', borderRadius: 3, padding: '0 2px' }}>
+            {p.slice(1, -1)}
+          </mark>
+        ) : (
+          <span key={i}>{p}</span>
+        )
+      )}
+    </>
+  )
+}
+
+const KIND_LABELS: Record<string, string> = {
+  note: 'Заметка',
+  ai: 'ИИ-чат',
+  doc: 'Документ',
+  answer: 'Ответ',
+  code: 'Код',
+  codeblock: 'Код',
+  search: 'Поиск',
+  image: 'Картинка',
+  deck: 'Слайды',
+  diagram: 'Схема',
+  pdf: 'PDF',
+  kanban: 'Канбан',
+  list: 'Список',
+  sheet: 'Таблица',
+  webgpt: 'ChatGPT',
+  webgemini: 'Gemini',
+  webglm: 'GLM',
+  orchestrator: 'Оркестратор'
+}
+
+export function GlobalSearch({
+  open,
+  onClose,
+  commands,
+  onNavigate,
+  searchTranscripts
+}: {
+  open: boolean
+  onClose: () => void
+  commands: Command[]
+  onNavigate: (t: SearchNav) => void
+  searchTranscripts: (q: string) => { shapeId: string; snippet: string }[]
+}) {
+  const [q, setQ] = useState('')
+  const [tab, setTab] = useState<SearchTab>('all')
+  const [nodes, setNodes] = useState<NodeSearchHit[]>([])
+  const [mem, setMem] = useState<MemorySearchHit[]>([])
+  const [trans, setTrans] = useState<{ shapeId: string; snippet: string }[]>([])
+  const [recent, setRecent] = useState<string[]>(() => {
+    try {
+      return JSON.parse(localStorage.getItem(SEARCH_RECENT_LS) || '[]')
+    } catch {
+      return []
+    }
+  })
+  const inputRef = useRef<HTMLInputElement>(null)
+
+  useEffect(() => {
+    if (open) {
+      setQ('')
+      setNodes([])
+      setMem([])
+      setTrans([])
+      setTab('all')
+      const t = setTimeout(() => inputRef.current?.focus(), 30)
+      return () => clearTimeout(t)
+    }
+  }, [open])
+
+  // Дебаунс-поиск по всем источникам.
+  useEffect(() => {
+    if (!open) return
+    const query = q.trim()
+    if (!query) {
+      setNodes([])
+      setMem([])
+      setTrans([])
+      return
+    }
+    let cancelled = false
+    const t = setTimeout(async () => {
+      try {
+        const [nr, mr] = await Promise.all([
+          window.flow.nodes.search({ query, limit: 40 }),
+          window.flow.memory.search({ query, limit: 25 })
+        ])
+        if (cancelled) return
+        setNodes(nr.ok ? nr.data : [])
+        setMem(mr.ok ? mr.data : [])
+      } catch {
+        if (!cancelled) {
+          setNodes([])
+          setMem([])
+        }
+      }
+      try {
+        if (!cancelled) setTrans(searchTranscripts(query))
+      } catch {
+        /* ignore */
+      }
+    }, 180)
+    return () => {
+      cancelled = true
+      clearTimeout(t)
+    }
+  }, [q, open, searchTranscripts])
+
+  if (!open) return null
+
+  const commitRecent = (query: string): void => {
+    const v = query.trim()
+    if (!v) return
+    const next = [v, ...recent.filter((r) => r !== v)].slice(0, 8)
+    setRecent(next)
+    try {
+      localStorage.setItem(SEARCH_RECENT_LS, JSON.stringify(next))
+    } catch {
+      /* ignore */
+    }
+  }
+  const go = (t: SearchNav): void => {
+    commitRecent(q)
+    onNavigate(t)
+    onClose()
+  }
+
+  const query = q.trim().toLowerCase()
+  const cmdHits = query ? commands.filter((c) => c.label.toLowerCase().includes(query)) : commands
+  const showNodes = tab === 'all' || tab === 'nodes'
+  const showMem = tab === 'all' || tab === 'memory'
+  const showTrans = tab === 'all' || tab === 'transcripts'
+  const showCmd = tab === 'all' || tab === 'commands'
+  const total = nodes.length + mem.length + trans.length + (query ? cmdHits.length : 0)
+
+  const TABS: { id: SearchTab; label: string; n?: number }[] = [
+    { id: 'all', label: 'Всё' },
+    { id: 'nodes', label: 'Ноды', n: nodes.length },
+    { id: 'memory', label: 'Память', n: mem.length },
+    { id: 'transcripts', label: 'Транскрипты', n: trans.length },
+    { id: 'commands', label: 'Команды' }
+  ]
+
+  const sectionTitle: CSSProperties = {
+    font: `600 10px ${MONO}`,
+    color: 'var(--muted)',
+    textTransform: 'uppercase',
+    letterSpacing: '.06em',
+    padding: '10px 12px 4px'
+  }
+  const rowStyle: CSSProperties = {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: 2,
+    padding: '8px 11px',
+    borderRadius: 7,
+    cursor: 'pointer'
+  }
+  const rowMeta: CSSProperties = { font: `400 10.5px ${MONO}`, color: 'var(--muted)' }
+  const rowSnippet: CSSProperties = { font: `400 11.5px ${SANS}`, color: 'var(--muted)', lineHeight: 1.4 }
+
+  return (
+    <div
+      onMouseDown={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        zIndex: 80,
+        background: 'rgba(5,6,9,.6)',
+        backdropFilter: 'blur(3px)',
+        WebkitBackdropFilter: 'blur(3px)',
+        display: 'flex',
+        justifyContent: 'center',
+        paddingTop: '12vh'
+      }}
+    >
+      <div
+        onMouseDown={stop}
+        style={{
+          width: 620,
+          maxWidth: '94vw',
+          maxHeight: '72vh',
+          display: 'flex',
+          flexDirection: 'column',
+          background: 'var(--panel)',
+          border: '1px solid var(--border)',
+          borderRadius: 12,
+          boxShadow: '0 24px 60px rgba(0,0,0,.6)',
+          overflow: 'hidden'
+        }}
+      >
+        <input
+          ref={inputRef}
+          value={q}
+          onChange={(e) => setQ(e.currentTarget.value)}
+          placeholder="Поиск по нодам, памяти, транскриптам всех досок…"
+          style={{
+            width: '100%',
+            background: 'transparent',
+            border: 'none',
+            borderBottom: '1px solid var(--border)',
+            color: 'var(--text)',
+            font: `400 14px ${SANS}`,
+            padding: '14px 16px',
+            outline: 'none'
+          }}
+        />
+        <div style={{ display: 'flex', gap: 4, padding: '8px 10px', borderBottom: '1px solid var(--border)', flexWrap: 'wrap' }}>
+          {TABS.map((t) => (
+            <button
+              key={t.id}
+              onClick={() => setTab(t.id)}
+              style={{
+                font: `600 11px ${SANS}`,
+                color: tab === t.id ? 'var(--text)' : 'var(--muted)',
+                background: tab === t.id ? 'var(--panel2)' : 'transparent',
+                border: `1px solid ${tab === t.id ? 'var(--border)' : 'transparent'}`,
+                borderRadius: 6,
+                padding: '4px 10px',
+                cursor: 'pointer'
+              }}
+            >
+              {t.label}
+              {typeof t.n === 'number' && t.n > 0 ? ` · ${t.n}` : ''}
+            </button>
+          ))}
+        </div>
+        <div className="os-scroll" style={{ flex: 1, overflowY: 'auto', padding: 6 }}>
+          {!query && recent.length > 0 && (
+            <>
+              <div style={sectionTitle}>Недавние запросы</div>
+              {recent.map((r, i) => (
+                <div key={i} className="os-cmd-item" onClick={() => setQ(r)} style={{ ...rowStyle, cursor: 'pointer' }}>
+                  <span style={{ font: `400 12.5px ${SANS}`, color: 'var(--text)' }}>🕑 {r}</span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {query && showNodes && nodes.length > 0 && (
+            <>
+              <div style={sectionTitle}>Ноды</div>
+              {nodes.map((h) => (
+                <div
+                  key={h.shapeId}
+                  className="os-cmd-item"
+                  onClick={() => go({ type: 'node', boardId: h.boardId, shapeId: h.shapeId })}
+                  style={rowStyle}
+                >
+                  <span style={{ font: `500 12.5px ${SANS}`, color: 'var(--text)' }}>
+                    {h.title || '(без названия)'}
+                  </span>
+                  <span style={rowMeta}>
+                    {(KIND_LABELS[h.kind] || h.kind || 'нода')} · {h.boardName || 'доска'}
+                  </span>
+                  {h.snippet && (
+                    <span style={rowSnippet}>
+                      <Snippet text={h.snippet} />
+                    </span>
+                  )}
+                </div>
+              ))}
+            </>
+          )}
+
+          {query && showMem && mem.length > 0 && (
+            <>
+              <div style={sectionTitle}>Память доски</div>
+              {mem.map((h, i) => (
+                <div
+                  key={`${h.boardId}-${h.periodKey}-${i}`}
+                  className="os-cmd-item"
+                  onClick={() => go({ type: 'memory', boardId: h.boardId })}
+                  style={rowStyle}
+                >
+                  <span style={{ font: `500 12.5px ${SANS}`, color: 'var(--text)' }}>🧠 {h.periodKey}</span>
+                  <span style={rowSnippet}>
+                    <Snippet text={h.snippet} />
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {query && showTrans && trans.length > 0 && (
+            <>
+              <div style={sectionTitle}>Транскрипты чатов</div>
+              {trans.map((h, i) => (
+                <div
+                  key={`${h.shapeId}-${i}`}
+                  className="os-cmd-item"
+                  onClick={() => go({ type: 'transcript', shapeId: h.shapeId })}
+                  style={rowStyle}
+                >
+                  <span style={{ font: `500 12.5px ${SANS}`, color: 'var(--text)' }}>💬 Диалог</span>
+                  <span style={rowSnippet}>{h.snippet}</span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {showCmd && cmdHits.length > 0 && (
+            <>
+              <div style={sectionTitle}>Команды</div>
+              {cmdHits.map((c, i) => (
+                <div key={i} className="os-cmd-item" onClick={() => go({ type: 'command', run: c.run })} style={rowStyle}>
+                  <span style={{ display: 'flex', alignItems: 'center', gap: 10 }}>
+                    <span style={{ font: `400 12.5px ${SANS}`, color: 'var(--text)' }}>{c.label}</span>
+                    <span style={{ flex: 1 }} />
+                    <span style={{ font: `400 10px ${MONO}`, color: 'var(--muted)' }}>{c.hint}</span>
+                  </span>
+                </div>
+              ))}
+            </>
+          )}
+
+          {query && total === 0 && (
+            <div style={{ padding: '14px 12px', font: `400 12.5px ${SANS}`, color: 'var(--muted)' }}>
+              Ничего не найдено. Ноды индексируются при открытии/правке доски.
             </div>
           )}
         </div>

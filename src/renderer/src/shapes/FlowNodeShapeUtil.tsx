@@ -38,6 +38,18 @@ import ScaledSlide from '../slides/SlideHtml'
 import { parseSlide } from '../slides/SlideView'
 import { renderMermaidCode } from '../slides/mermaid'
 import { NodeIcon } from '../os/nodeIcons'
+import { parseAndMigrateExtra, markCorrupt, clearCorrupt, isExtraCorrupt, corruptRaw } from './schemas'
+import { encode as gptEncode } from 'gpt-tokenizer'
+
+// T3.1: приближённая оценка токенов (gpt-tokenizer, cl100k). В UI помечаем «≈».
+export function estimateTokens(text: string): number {
+  if (!text) return 0
+  try {
+    return gptEncode(text).length
+  } catch {
+    return Math.ceil(text.length / 4)
+  }
+}
 import { SLIDE_SYSTEM_PROMPT, PALETTES, customPalette, type Palette } from '../slides/design'
 import { slidesToPngs, exportPdf, exportPptx, type ExportItem } from '../slides/exporter'
 
@@ -124,6 +136,9 @@ const KINDS: Record<string, { color: string; grad: string; icon: string }> = {
   webgpt: { color: '#10A37F', grad: 'linear-gradient(160deg,#1fbe97,#10A37F)', icon: '💬' },
   webgemini: { color: '#4285F4', grad: 'linear-gradient(160deg,#6fa8ff,#4285F4)', icon: '✦' },
   webglm: { color: '#3B6FF6', grad: 'linear-gradient(160deg,#6d94ff,#3B6FF6)', icon: '🌐' },
+  daylane: { color: '#64748B', grad: 'linear-gradient(160deg,#94a3b8,#64748B)', icon: '📆' },
+  tlaxis: { color: '#475569', grad: 'linear-gradient(160deg,#64748b,#475569)', icon: '🗓' },
+  boardmem: { color: '#F59E0B', grad: 'linear-gradient(160deg,#fbbf5a,#F59E0B)', icon: '🧠' },
   notebook: { color: '#F9A825', grad: 'linear-gradient(160deg,#ffca28,#F9A825)', icon: '📓' },
   pdf: { color: '#FF6B6B', grad: 'linear-gradient(160deg,#ff8a8a,#FF6B6B)', icon: '📕' },
   orchestrator: { color: '#A78BFA', grad: 'linear-gradient(160deg,#c4b1ff,#A78BFA)', icon: '🕸' },
@@ -156,6 +171,9 @@ const KIND_NAME: Record<string, string> = {
   webgpt: 'ChatGPT',
   webgemini: 'Gemini',
   webglm: 'GLM',
+  daylane: 'День',
+  tlaxis: 'Ось',
+  boardmem: 'Память доски',
   notebook: 'Ноутбук',
   pdf: 'PDF',
   orchestrator: 'Оркестратор',
@@ -338,6 +356,306 @@ export type WebLLMDriver = {
 }
 export const webLLMRegistry = new Map<string, WebLLMDriver>()
 
+// ============================================================================
+// Память доски (таймлайн-режим): накопительные дневные выжимки контекста. СВОЯ у
+// каждой доски — ключ по boardId (у другой доски своя память). Живёт в localStorage
+// renderer (не в props шейпа — чтобы не раздувать undo/сохранение/синхронизацию).
+// RAG-БД файлов (AnythingLLM) — отдельная система и может пересекаться между досками.
+// ============================================================================
+export type MemScope = 'day' | 'week' | 'month'
+export type BoardMemEntry = { date: string; text: string; ts: number; scope?: MemScope }
+const bid = (boardId: string): string => boardId || 'default'
+// Синхронный кэш памяти доски в renderer. Источник истины — локальная БД в main (T1.1),
+// но boardMemText/readBoardMem вызываются СИНХРОННО (в extractNodeContext — сбор контекста
+// по стрелкам), поэтому держим зеркало здесь: гидратируем при загрузке/смене доски,
+// пишем — сразу в кэш + асинхронно в БД.
+const memCache = new Map<string, BoardMemEntry[]>()
+const memHydrated = new Set<string>()
+
+// Загрузить память доски из БД в кэш. Вызывать при открытии/смене доски.
+export async function hydrateBoardMem(boardId: string): Promise<void> {
+  const id = bid(boardId)
+  try {
+    const res = await window.flow.memory.list({ boardId: id })
+    if (res.ok) {
+      memCache.set(
+        id,
+        res.data
+          .map((e) => ({ date: e.periodKey, text: e.content, ts: e.updatedAt, scope: e.periodKind as MemScope }))
+          .sort((a, b) => a.date.localeCompare(b.date))
+      )
+      memHydrated.add(id)
+      try {
+        window.dispatchEvent(new CustomEvent('flow-boardmem-updated', { detail: id }))
+      } catch {
+        /* ignore */
+      }
+    }
+  } catch {
+    /* мягкая деградация: память пустая, приложение работает */
+  }
+}
+export function isBoardMemHydrated(boardId: string): boolean {
+  return memHydrated.has(bid(boardId))
+}
+export function readBoardMem(boardId: string): BoardMemEntry[] {
+  return memCache.get(bid(boardId)) || []
+}
+// Добавить/заменить выжимку за (дата, scope) — один период = одна запись. Кэш обновляется
+// синхронно, запись в БД — асинхронно (fire-and-forget с логом ошибки).
+function appendBoardMem(boardId: string, entry: BoardMemEntry): void {
+  const id = bid(boardId)
+  const scope: MemScope = entry.scope || 'day'
+  const norm: BoardMemEntry = { ...entry, scope }
+  const list = (memCache.get(id) || []).slice()
+  const idx = list.findIndex((e) => e.date === norm.date && (e.scope || 'day') === scope)
+  if (idx >= 0) list[idx] = norm
+  else list.push(norm)
+  list.sort((a, b) => a.date.localeCompare(b.date))
+  memCache.set(id, list)
+  try {
+    window.dispatchEvent(new CustomEvent('flow-boardmem-updated', { detail: id }))
+  } catch {
+    /* ignore */
+  }
+  window.flow.memory
+    .upsert({ boardId: id, periodKind: scope, periodKey: norm.date, content: norm.text, ts: norm.ts })
+    .then((r) => {
+      if (!r.ok) console.error('[memory] upsert failed:', r.error)
+    })
+    .catch((e) => console.error('[memory] upsert error:', e))
+  // T2.4: текст выжимки изменился — эмбеддинг устарел, инвалидируем и пересчитаем в фоне.
+  memEmbCache.get(id)?.delete(embKey(scope, norm.date))
+  void backgroundIndexMem(id)
+}
+// Вся память доски одним текстом (для контекста связанным нодам и следующим дням).
+export function boardMemText(boardId: string): string {
+  return readBoardMem(boardId)
+    .map((e) => `[${e.date}] ${e.text}`)
+    .join('\n\n')
+}
+
+// T4.1: поиск по транскриптам веб-чат/агент-нод (agentTranscripts живёт в renderer, только
+// для смонтированных в этой сессии нод). Возвращает id shape + сниппет вокруг совпадения.
+export function searchTranscripts(query: string, limit = 30): { shapeId: string; snippet: string }[] {
+  const q = query.trim().toLowerCase()
+  if (!q) return []
+  const out: { shapeId: string; snippet: string }[] = []
+  for (const [id, text] of agentTranscripts) {
+    const idx = text.toLowerCase().indexOf(q)
+    if (idx < 0) continue
+    const start = Math.max(0, idx - 40)
+    const snippet =
+      (start > 0 ? '…' : '') + text.slice(start, idx + q.length + 80).replace(/\s+/g, ' ').trim() + '…'
+    out.push({ shapeId: id, snippet })
+    if (out.length >= limit) break
+  }
+  return out
+}
+
+// ── T2.4: память доски через retrieval (вместо «вся память в контекст») ──────────
+function cosineSim(a: number[], b: number[]): number {
+  let dot = 0
+  let na = 0
+  let nb = 0
+  const n = Math.min(a.length, b.length)
+  for (let i = 0; i < n; i++) {
+    dot += a[i] * b[i]
+    na += a[i] * a[i]
+    nb += b[i] * b[i]
+  }
+  return dot / (Math.sqrt(na) * Math.sqrt(nb) + 1e-8)
+}
+// boardId → ("kind|periodKey" → vector). Зеркало memory_embeddings в renderer.
+const memEmbCache = new Map<string, Map<string, number[]>>()
+const embKey = (kind: string, key: string): string => `${kind || 'day'}|${key}`
+
+let memCfg = { retrieval: true, budget: 4000, recentDays: 7, topK: 6 }
+export async function refreshMemCfg(): Promise<void> {
+  try {
+    const s = await window.flow.getSettings()
+    memCfg = {
+      retrieval: s.memoryRetrieval !== false,
+      budget: s.memoryContextBudget || 4000,
+      recentDays: s.memoryRecentDays || 7,
+      topK: s.memoryTopK || 6
+    }
+  } catch {
+    /* defaults */
+  }
+}
+
+// Загрузить эмбеддинги выжимок доски из БД + фоново досчитать недостающие.
+export async function hydrateMemEmbeddings(boardId: string): Promise<void> {
+  const id = boardId || 'default'
+  try {
+    const res = await window.flow.memory.embList({ boardId: id })
+    if (res.ok) {
+      const m = new Map<string, number[]>()
+      for (const e of res.data) m.set(embKey(e.periodKind, e.periodKey), e.vector)
+      memEmbCache.set(id, m)
+    }
+  } catch {
+    /* ignore */
+  }
+  void backgroundIndexMem(id)
+}
+
+// Фоновая доиндексация: эмбеддим выжимки без вектора (порциями, чтобы не грузить всё сразу).
+async function backgroundIndexMem(boardId: string): Promise<void> {
+  const id = boardId || 'default'
+  const entries = readBoardMem(id)
+  if (!entries.length) return
+  const cache = memEmbCache.get(id) || new Map<string, number[]>()
+  memEmbCache.set(id, cache)
+  const todo = entries.filter((e) => !cache.has(embKey(e.scope || 'day', e.date))).slice(0, 30)
+  if (!todo.length) return
+  try {
+    const vecs = await embedPassages(todo.map((e) => e.text.slice(0, 2000)))
+    for (let i = 0; i < todo.length; i++) {
+      const e = todo[i]
+      const kind = (e.scope || 'day') as MemScope
+      cache.set(embKey(kind, e.date), vecs[i])
+      window.flow.memory.embSet({ boardId: id, periodKind: kind, periodKey: e.date, vector: vecs[i] }).catch(() => {})
+    }
+    try {
+      window.dispatchEvent(new CustomEvent('flow-boardmem-updated', { detail: id }))
+    } catch {
+      /* ignore */
+    }
+  } catch {
+    /* модель эмбеддингов недоступна — retrieval мягко деградирует до recent+сводок */
+  }
+}
+
+// Собрать контекст памяти: последние N дней + top-k релевантных старых (по queryVector) +
+// недельные/месячные сводки, в пределах токен-бюджета. queryVector=null → без релевантности
+// (только последние + сводки). Флаг retrieval выключен → вся память (прежнее поведение).
+export function buildMemoryContext(boardId: string, queryVector: number[] | null): string {
+  const id = boardId || 'default'
+  const entries = readBoardMem(id)
+  if (!entries.length) return ''
+  if (!memCfg.retrieval) return boardMemText(id)
+  const fmt = (e: BoardMemEntry): string => `[${e.date}] ${e.text}`
+  const days = entries.filter((e) => (e.scope || 'day') === 'day').sort((a, b) => a.date.localeCompare(b.date))
+  const monthly = entries.filter((e) => e.scope === 'month')
+  const weekly = entries.filter((e) => e.scope === 'week')
+  const recent = days.slice(-memCfg.recentDays)
+  const recentKeys = new Set(recent.map((e) => e.date))
+  const older = days.filter((e) => !recentKeys.has(e.date))
+  // Релевантные старые дни по косинусу к запросу (если есть вектор и эмбеддинги).
+  let relevantOlder: BoardMemEntry[] = []
+  const cache = memEmbCache.get(id)
+  if (queryVector && cache) {
+    relevantOlder = older
+      .map((e) => ({ e, s: cache.has(embKey('day', e.date)) ? cosineSim(queryVector, cache.get(embKey('day', e.date))!) : -1 }))
+      .filter((x) => x.s >= 0)
+      .sort((a, b) => b.s - a.s)
+      .slice(0, memCfg.topK)
+      .map((x) => x.e)
+  }
+  // Отбор в пределах бюджета: сначала компактные сводки, затем свежие дни, затем релевантные старые.
+  const budget = memCfg.budget
+  let used = 0
+  const picked = new Set<BoardMemEntry>()
+  const tryAdd = (e: BoardMemEntry): void => {
+    if (picked.has(e)) return
+    const t = estimateTokens(fmt(e))
+    if (used + t <= budget) {
+      picked.add(e)
+      used += t
+    }
+  }
+  monthly.forEach(tryAdd)
+  weekly.forEach(tryAdd)
+  ;[...recent].reverse().forEach(tryAdd)
+  relevantOlder.forEach(tryAdd)
+  const byDate = (a: BoardMemEntry, b: BoardMemEntry): number => a.date.localeCompare(b.date)
+  const out = [
+    ...monthly.filter((e) => picked.has(e)),
+    ...weekly.filter((e) => picked.has(e)),
+    ...relevantOlder.filter((e) => picked.has(e)).sort(byDate),
+    ...recent.filter((e) => picked.has(e))
+  ]
+  return out.map(fmt).join('\n\n')
+}
+
+// Выжимка «дня» таймлайна: собрать контент нод, чьи ЦЕНТРЫ по вертикали попадают в
+// полосу дня [yTop, yBottom), суммаризовать (с учётом прошлой памяти — только новое) и
+// добавить в память доски. Так «конец дня» накопительно передаётся в следующий день.
+export async function digestDayRange(
+  editor: Editor,
+  boardId: string,
+  yTop: number,
+  yBottom: number,
+  dateIso: string
+): Promise<{ ok: boolean; error?: string; empty?: boolean }> {
+  const parts: string[] = []
+  for (const s of editor.getCurrentPageShapes()) {
+    if (s.type !== 'flow-node') continue
+    const fs = s as FlowNodeShape
+    if (fs.props.kind === 'boardmem' || fs.props.kind === 'daylane' || fs.props.kind === 'tlaxis') continue
+    const b = editor.getShapePageBounds(s.id)
+    if (!b) continue
+    const cy = b.y + b.h / 2
+    if (cy >= yTop && cy < yBottom) {
+      const ctx = extractNodeContext(editor, fs)
+      if (ctx) parts.push(ctx)
+    }
+  }
+  const content = parts.join('\n\n').slice(0, 12000)
+  if (!content) return { ok: false, empty: true }
+  const prior = boardMemText(boardId).slice(-6000)
+  const res = await window.flow.aiChat({
+    model: '',
+    messages: [
+      {
+        role: 'system',
+        content:
+          'Ты ведёшь ГЛОБАЛЬНУЮ ПАМЯТЬ проекта на доске. По содержимому за день сделай сжатую выжимку (5–10 пунктов): ' +
+          'что сделано, ключевые решения/факты/файлы, что важно помнить дальше. По-русски, по пунктам. ' +
+          'Учитывай прошлую память для связности, но НЕ повторяй её — фиксируй только НОВОЕ за этот день.'
+      },
+      { role: 'user', content: `ПРОШЛАЯ ПАМЯТЬ ПРОЕКТА:\n${prior || '(пусто)'}\n\nСОДЕРЖИМОЕ ДНЯ ${dateIso}:\n${content}` }
+    ],
+    timeoutMs: 90000
+  })
+  if (!res.ok) return { ok: false, error: res.error }
+  appendBoardMem(boardId, { date: dateIso, text: res.content.trim(), ts: Date.now(), scope: 'day' })
+  return { ok: true }
+}
+
+// Сводка периода (неделя/месяц): суммаризует ДНЕВНЫЕ выжимки этих дат в итог более
+// высокого уровня и кладёт отдельной записью памяти (с scope). Для авто-выгрузки
+// «после каждой недели/месяца».
+export async function rollupMemory(
+  boardId: string,
+  scope: 'week' | 'month',
+  dateKey: string,
+  label: string,
+  isoDates: string[]
+): Promise<{ ok: boolean; empty?: boolean; error?: string }> {
+  const daily = readBoardMem(boardId).filter((e) => (!e.scope || e.scope === 'day') && isoDates.includes(e.date))
+  if (!daily.length) return { ok: false, empty: true }
+  const body = daily.map((e) => `[${e.date}] ${e.text}`).join('\n\n')
+  const res = await window.flow.aiChat({
+    model: '',
+    messages: [
+      {
+        role: 'system',
+        content:
+          `Ты сводишь память проекта за ${label}. По дневным выжимкам сделай КРАТКИЙ ИТОГ ПЕРИОДА (5–8 пунктов): ` +
+          'главное и достигнутое, ключевые решения, что важно помнить дальше. По-русски, по пунктам.'
+      },
+      { role: 'user', content: body }
+    ],
+    timeoutMs: 90000
+  })
+  if (!res.ok) return { ok: false, error: res.error }
+  appendBoardMem(boardId, { date: dateKey, text: res.content.trim(), ts: Date.now(), scope })
+  return { ok: true }
+}
+
 // Текст-контекст из ноды-источника (для передачи в связанный чат по стрелке).
 function extractNodeContext(editor: Editor, s: FlowNodeShape): string {
   const p = s.props
@@ -362,6 +680,17 @@ function extractNodeContext(editor: Editor, s: FlowNodeShape): string {
         ? 'OpenScience'
         : `Веб-чат ${webLLMConf(p.kind).name}`
     return `${label}${title ? ` «${title}»` : ''}:\n${t.slice(-8000)}`
+  }
+  if (p.kind === 'boardmem') {
+    // Глобальная память доски (накопленные дневные выжимки) — для связанных ИИ/оркестратора.
+    let ex: { boardId?: string } = {}
+    try {
+      ex = JSON.parse(p.extra || '{}')
+    } catch {
+      /* ignore */
+    }
+    const t = boardMemText(ex.boardId || '')
+    return t ? `Глобальная память доски (по дням):\n${t.slice(-8000)}` : ''
   }
   if (p.kind === 'ai') {
     // Последние реплики диалога — чтобы следующий чат «видел» ход обсуждения
@@ -429,11 +758,35 @@ function extractNodeContext(editor: Editor, s: FlowNodeShape): string {
   return `${title ? title + ':\n' : ''}${b}`
 }
 
-// Собрать контекст из нод, соединённых стрелкой с этим чатом — В ЛЮБУЮ СТОРОНУ.
-// Любой файл/заметка/ноутбук/код/схема/ответ, связанный стрелкой с чатом, попадает
-// в контекст. Исключаем: живые чаты с моделью и собственные ответы этого чата.
-function gatherChatContext(editor: Editor, nodeId: string, skipKinds?: Set<string>): string[] {
-  const out: string[] = []
+// T3.1: один источник контекста для инспектора и отправки.
+export type ContextSource = { shapeId: string; kind: string; title: string; text: string; tokens: number }
+
+// Временные (сессионные) исключения источников из контекста конкретной ноды.
+// «Исключить из этого запроса» — не удаляет стрелку, живёт до перезапуска.
+const contextExclusions = new Map<string, Set<string>>()
+export function isSourceExcluded(nodeId: string, sourceId: string): boolean {
+  return contextExclusions.get(String(nodeId))?.has(String(sourceId)) ?? false
+}
+export function toggleSourceExclusion(nodeId: string, sourceId: string): void {
+  const key = String(nodeId)
+  const set = contextExclusions.get(key) || new Set<string>()
+  const sid = String(sourceId)
+  if (set.has(sid)) set.delete(sid)
+  else set.add(sid)
+  contextExclusions.set(key, set)
+}
+
+// Собрать СТРУКТУРИРОВАННЫЙ контекст из нод, соединённых стрелкой с этим чатом — В ЛЮБУЮ
+// СТОРОНУ. Любой файл/заметка/ноутбук/код/схема/ответ/память/веб-чат, связанный стрелкой,
+// попадает в контекст. Исключаем: собственные ответы этого чата и skipKinds.
+// ЕДИНЫЙ источник истины: и инспектор (T3.1), и отправка используют этот порядок и текст.
+export function gatherChatSources(
+  editor: Editor,
+  nodeId: string,
+  skipKinds?: Set<string>,
+  memQueryVector?: number[] | null
+): ContextSource[] {
+  const out: ContextSource[] = []
   const seen = new Set<string>()
   try {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -450,14 +803,43 @@ function gatherChatContext(editor: Editor, nodeId: string, skipKinds?: Set<strin
         if (src.id === nodeId) continue // сам себя не тянем
         if (src.props.sourceId === nodeId) continue // это собственный вывод этого чата
         if (skipKinds && skipKinds.has(src.props.kind)) continue // напр. оверлей-ноды оркестратора
-        const ctx = extractNodeContext(editor, src)
-        if (ctx) out.push(ctx.slice(0, 8000))
+        let text = ''
+        if (src.props.kind === 'boardmem') {
+          // T2.4: не вся память, а retrieval — последние дни + релевантные старые + сводки (в бюджете).
+          let bId = ''
+          try {
+            bId = (JSON.parse(src.props.extra || '{}') as { boardId?: string }).boardId || ''
+          } catch {
+            /* ignore */
+          }
+          const mem = buildMemoryContext(bId, memQueryVector ?? null)
+          text = mem ? `Память проекта на доске:\n${mem}` : ''
+        } else {
+          const ctx = extractNodeContext(editor, src)
+          text = ctx ? ctx.slice(0, 8000) : ''
+        }
+        if (!text) continue
+        out.push({
+          shapeId: String(src.id),
+          kind: src.props.kind,
+          title: ((src.props.title || '').trim() || KIND_NAME[src.props.kind] || src.props.kind).slice(0, 80),
+          text,
+          tokens: estimateTokens(text)
+        })
       }
     }
   } catch {
     /* API отличается — не критично */
   }
   return out
+}
+
+// Текст-контекст для ОТПРАВКИ: те же источники, минус временно исключённые (T3.1).
+// Порядок и содержимое совпадают с инспектором побайтово.
+function gatherChatContext(editor: Editor, nodeId: string, skipKinds?: Set<string>, memQueryVector?: number[] | null): string[] {
+  return gatherChatSources(editor, nodeId, skipKinds, memQueryVector)
+    .filter((s) => !isSourceExcluded(nodeId, s.shapeId))
+    .map((s) => s.text)
 }
 
 // Ноды, которые оркестратор НЕ должен втягивать в контекст (его собственный оверлей).
@@ -1416,6 +1798,156 @@ async function applyFlowActions(editor: Editor, sourceId: string, actions: any[]
   return parts.join(' · ')
 }
 
+// T3.1: инспектор контекста — что именно уйдёт в модель и сколько это токенов.
+// Использует тот же gatherChatSources, что и отправка (состав и порядок совпадают).
+function ContextInspector({
+  shape,
+  editor,
+  model,
+  ctxLimit,
+  onClose
+}: {
+  shape: FlowNodeShape
+  editor: Editor
+  model: string
+  ctxLimit: number
+  onClose: () => void
+}) {
+  const [, force] = useState(0)
+  const nodeId = String(shape.id)
+  // T2.4: если подключена память — эмбеддим текст ноды, чтобы инспектор показал
+  // именно retrieval-выборку памяти (релевантную запросу), а не всю.
+  const [memVec, setMemVec] = useState<number[] | null>(null)
+  useEffect(() => {
+    let alive = true
+    const q = (shape.props.body || '').trim()
+    const hasMem = gatherChatSources(editor, nodeId).some((s) => s.kind === 'boardmem')
+    if (hasMem && q) {
+      embedQuery(q)
+        .then((v) => {
+          if (alive) setMemVec(v)
+        })
+        .catch(() => {})
+    }
+    return () => {
+      alive = false
+    }
+  }, [editor, nodeId, shape.props.body])
+  const sources = gatherChatSources(editor, nodeId, undefined, memVec)
+  const included = sources.filter((s) => !isSourceExcluded(nodeId, s.shapeId))
+  const total = included.reduce((n, s) => n + s.tokens, 0)
+  const over = total > ctxLimit
+  const [copied, setCopied] = useState(false)
+  const copyPrompt = (): void => {
+    const text = included.map((s) => s.text).join('\n\n———\n\n')
+    try {
+      navigator.clipboard.writeText(text)
+      setCopied(true)
+      setTimeout(() => setCopied(false), 1500)
+    } catch {
+      /* ignore */
+    }
+  }
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      style={{
+        position: 'absolute',
+        top: 8,
+        left: 8,
+        right: 8,
+        maxHeight: 'calc(100% - 16px)',
+        zIndex: 5,
+        display: 'flex',
+        flexDirection: 'column',
+        background: C.card,
+        border: `1px solid ${C.border}`,
+        borderRadius: 10,
+        boxShadow: '0 16px 44px rgba(0,0,0,.5)',
+        overflow: 'hidden'
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          alignItems: 'center',
+          gap: 8,
+          padding: '8px 11px',
+          borderBottom: `1px solid ${C.border}`
+        }}
+      >
+        <span style={{ font: `700 12px ${NODE_SANS}`, color: C.text }}>🧮 Контекст запроса</span>
+        <span style={{ flex: 1 }} />
+        <span style={{ font: `600 11px ${NODE_MONO}`, color: over ? C.red : C.textDim }}>
+          ≈{fmtTokens(total)} / {fmtTokens(ctxLimit)}
+        </span>
+        <button className="flow-mini-btn" onClick={onClose} style={miniBtnStyle} title="Закрыть">
+          ✕
+        </button>
+      </div>
+      {over && (
+        <div style={{ padding: '7px 11px', font: `400 11px ${NODE_SANS}`, color: C.red, background: 'rgba(248,113,113,.1)' }}>
+          ⚠ Превышен лимит модели ({model ? model.slice(0, 22) : 'локальная'}). Провайдер обрежет контекст;
+          источники — в порядке добавления, при обрезке первыми страдают последние. Исключи лишнее ниже.
+        </div>
+      )}
+      <div style={{ flex: 1, overflow: 'auto', padding: 6, display: 'flex', flexDirection: 'column', gap: 3 }}>
+        {sources.length === 0 && (
+          <div style={{ padding: '9px 8px', font: `400 12px ${NODE_SANS}`, color: C.textDim, lineHeight: 1.5 }}>
+            Нет связанных источников. Соедини ноды (заметки, файлы, код, PDF, память доски, веб-чаты)
+            стрелкой с этим чатом — их содержимое попадёт в запрос.
+          </div>
+        )}
+        {sources.map((s) => {
+          const excluded = isSourceExcluded(nodeId, s.shapeId)
+          return (
+            <label
+              key={s.shapeId}
+              style={{
+                display: 'flex',
+                alignItems: 'flex-start',
+                gap: 8,
+                padding: '6px 8px',
+                borderRadius: 6,
+                cursor: 'pointer',
+                opacity: excluded ? 0.45 : 1
+              }}
+            >
+              <input
+                type="checkbox"
+                checked={!excluded}
+                onChange={() => {
+                  toggleSourceExclusion(nodeId, s.shapeId)
+                  force((n) => n + 1)
+                }}
+                style={{ marginTop: 2 }}
+              />
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ font: `500 12px ${NODE_SANS}`, color: C.text, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                  {s.title}
+                </div>
+                <div style={{ font: `400 10px ${NODE_MONO}`, color: C.textDim }}>
+                  {KIND_NAME[s.kind] || s.kind} · ≈{fmtTokens(s.tokens)} ток.
+                </div>
+              </div>
+            </label>
+          )
+        })}
+      </div>
+      <div style={{ padding: '7px 11px', borderTop: `1px solid ${C.border}`, display: 'flex', gap: 8, alignItems: 'center' }}>
+        <button className="flow-mini-btn" onClick={copyPrompt} style={miniBtnStyle} disabled={!included.length}>
+          {copied ? 'Скопировано ✓' : 'Скопировать промпт целиком'}
+        </button>
+        <span style={{ flex: 1 }} />
+        <span style={{ font: `400 10px ${NODE_MONO}`, color: C.textDim }}>
+          {included.length}/{sources.length} источн.
+        </span>
+      </div>
+    </div>
+  )
+}
+
 function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
   const update = useUpdate(editor, shape)
   const { body, model, contextTokens } = shape.props
@@ -1440,6 +1972,7 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
   const attachInput = useRef<HTMLInputElement>(null)
   const [dragOver, setDragOver] = useState(false)
   const [menuOpen, setMenuOpen] = useState(false)
+  const [inspectorOpen, setInspectorOpen] = useState(false) // T3.1: инспектор контекста
   const ctxLimit = contextLimitFor(model)
 
   const flash = (msg: string) => {
@@ -1592,8 +2125,17 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
             sciContext
         })
       }
-      // Контекст от связанных чатов/нод: стрелки, ведущие В этот чат
-      const linked = gatherChatContext(editor, shape.id)
+      // Контекст от связанных чатов/нод: стрелки, ведущие В этот чат.
+      // T2.4: если подключена нода памяти — эмбеддим вопрос, чтобы подтянуть релевантные
+      // старые выжимки (а не всю память). Модель эмбеддингов грузим только при наличии памяти.
+      let memVec: number[] | null = null
+      try {
+        const hasMem = gatherChatSources(editor, shape.id).some((s) => s.kind === 'boardmem')
+        if (hasMem && body.trim()) memVec = await embedQuery(body).catch(() => null)
+      } catch {
+        /* без релевантности — фолбэк на последние + сводки */
+      }
+      const linked = gatherChatContext(editor, shape.id, undefined, memVec)
       if (linked.length) {
         flash(`🔗 Подхватил контекст: ${linked.length} ${linked.length === 1 ? 'источник' : 'источника(ов)'}`)
         finalMessages.push({
@@ -1683,8 +2225,11 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
     <div
       onPointerDown={stopEventPropagation}
       onWheelCapture={stopEventPropagation}
-      style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}
+      style={{ display: 'flex', flexDirection: 'column', gap: 8, height: '100%', position: 'relative' }}
     >
+      {inspectorOpen && (
+        <ContextInspector shape={shape} editor={editor} model={model} ctxLimit={ctxLimit} onClose={() => setInspectorOpen(false)} />
+      )}
       {/* Выбор модели (LM Studio + API-провайдеры) */}
       <ModelSelect value={model} onChange={(v) => update({ model: v })} />
 
@@ -1913,6 +2458,14 @@ function AiBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
           </span>
           <span style={{ fontSize: 10.5, color: C.textDim }}>
             {fmtTokens(contextTokens)} / {fmtTokens(ctxLimit)}
+            <button
+              className="flow-mini-btn"
+              onClick={() => setInspectorOpen((v) => !v)}
+              title="Инспектор контекста: что уйдёт в модель"
+              style={miniBtnStyle}
+            >
+              🧮 контекст
+            </button>
             <button className="flow-mini-btn" onClick={resetContext} title="Очистить контекст" style={miniBtnStyle}>
               сброс
             </button>
@@ -1988,6 +2541,42 @@ function parseExtra(s: string): Record<string, string> {
   } catch {
     return {}
   }
+}
+
+// T1.2: прогнать все flow-node доски через схему+миграции extra. Повреждённые ноды
+// (невалидный JSON/не-объект) помечаются и рендерятся заглушкой; мигрированные — extra
+// однократно перезаписывается (тихо, без засорения undo). Идемпотентно; безопасно
+// вызывать после каждой загрузки снапшота.
+export function migrateBoardExtras(editor: Editor): { migrated: number; corrupt: number } {
+  let migrated = 0
+  let corrupt = 0
+  const updates: { id: FlowNodeShape['id']; type: 'flow-node'; props: { extra: string } }[] = []
+  for (const s of editor.getCurrentPageShapes()) {
+    if (s.type !== 'flow-node') continue
+    const fs = s as FlowNodeShape
+    const id = String(fs.id)
+    const res = parseAndMigrateExtra(fs.props.kind, fs.props.extra || '{}')
+    if (res.status === 'corrupt') {
+      markCorrupt(id, res.raw)
+      corrupt++
+      continue
+    }
+    clearCorrupt(id)
+    if (res.status === 'migrated' && res.json !== fs.props.extra) {
+      updates.push({ id: fs.id, type: 'flow-node', props: { extra: res.json } })
+      migrated++
+    }
+  }
+  if (updates.length) {
+    // Применяем как «удалённые» изменения — без записи в undo-историю пользователя.
+    const store = editor.store as unknown as { mergeRemoteChanges?: (fn: () => void) => void }
+    if (typeof store.mergeRemoteChanges === 'function') {
+      store.mergeRemoteChanges(() => editor.updateShapes(updates))
+    } else {
+      editor.updateShapes(updates)
+    }
+  }
+  return { migrated, corrupt }
 }
 
 // Убрать markdown-ограждение ```<язык> … ``` из ответа модели (python, mermaid и т.п.)
@@ -5600,7 +6189,9 @@ function b64ToBytes(b64: string): Uint8Array {
 const pdfIndexing = new Set<string>()
 
 // Хайлайт-аннотация на странице PDF. bbox нормализован (0..1) — переживает зум/масштаб.
-type PdfQA = { question: string; answer: string; at: number }
+// T2.2: источник-цитата (номер → страница + якорный текст для подсветки).
+type PdfSource = { n: number; page: number; text: string }
+type PdfQA = { question: string; answer: string; at: number; sources?: PdfSource[] }
 type PdfHighlight = {
   id: string
   page: number
@@ -5619,6 +6210,7 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
     indexed?: boolean
     highlights?: PdfHighlight[]
     qaModel?: string
+    noRag?: boolean // PDF брошен «только на доску» — НЕ индексировать (не эмбеддить)
   }
   const pdfId = ex.pdfId || ''
   const setEx = (patch: Record<string, unknown>): void => update({ extra: JSON.stringify({ ...ex, ...patch }) })
@@ -5707,16 +6299,25 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
   const streamRef = useRef<{
     reqId: string
     onToken: (d: string) => void
-    onDone: (t: string) => void
+    onDone: (t: string, sources?: PdfSource[]) => void
     onError: (e: string) => void
   } | null>(null)
+  // T2.2: временная подсветка перехода по цитате (страница + фрагмент источника).
+  const [flashCite, setFlashCite] = useState<PdfSource | null>(null)
+  const flashTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const goToCitation = (src: PdfSource): void => {
+    if (src.page >= 1) setPage(src.page)
+    setFlashCite(src)
+    if (flashTimer.current) clearTimeout(flashTimer.current)
+    flashTimer.current = setTimeout(() => setFlashCite(null), 5000)
+  }
 
   useEffect(() => {
     const off = window.flow.onPdfStream((m) => {
       const s = streamRef.current
       if (!s || m.reqId !== s.reqId) return
       if (m.channel === 'token') s.onToken(m.delta || '')
-      else if (m.channel === 'done') s.onDone(m.text || '')
+      else if (m.channel === 'done') s.onDone(m.text || '', m.sources)
       else s.onError(m.error || 'ошибка')
     })
     return off
@@ -5753,13 +6354,13 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
     }
     const imageDataUrl = h.type === 'region' ? cropRegion(h) : undefined
     const reqId = nid('q_')
-    const finish = (answer: string): void => {
+    const finish = (answer: string, sources?: PdfSource[]): void => {
       streamRef.current = null
       setAsking(false)
       setLive('')
       // История Q&A хранится в самом хайлайте (переживает перезагрузку)
       const next = highlights.map((x) =>
-        x.id === h.id ? { ...x, qa: [...x.qa, { question: q, answer, at: Date.now() }] } : x
+        x.id === h.id ? { ...x, qa: [...x.qa, { question: q, answer, at: Date.now(), sources }] } : x
       )
       saveHls(next)
       setSel(next.find((x) => x.id === h.id) || null)
@@ -5767,7 +6368,7 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
     streamRef.current = {
       reqId,
       onToken: (d) => setLive((a) => a + d),
-      onDone: (t) => finish(t),
+      onDone: (t, sources) => finish(t, sources),
       onError: (e) => finish('⚠️ ' + e)
     }
     window.flow.pdfAsk({
@@ -5800,7 +6401,8 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
         const st = await window.flow.pdfIndexed({ id: pdfId })
         if (st.indexed && st.count > 0) {
           if (alive) setIndexed(true)
-        } else if (!pdfIndexing.has(pdfId)) {
+        } else if (!pdfIndexing.has(pdfId) && !ex.noRag) {
+          // ex.noRag = пользователь бросил PDF «только на доску» → не эмбеддим автоматически.
           indexPdf(pdf)
         }
       } catch (e) {
@@ -5947,6 +6549,36 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
             style={{ position: 'relative', display: 'inline-block', lineHeight: 0, cursor: 'crosshair' }}
           >
             <canvas ref={canvasRef} style={{ maxWidth: '100%', boxShadow: '0 2px 12px rgba(0,0,0,0.4)', borderRadius: 2, display: 'block' }} />
+            {/* T2.2: подсветка перехода по цитате — баннер с фрагментом источника на нужной странице */}
+            {flashCite && flashCite.page === page && (
+              <div
+                onPointerDown={(e) => e.stopPropagation()}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  setFlashCite(null)
+                }}
+                style={{
+                  position: 'absolute',
+                  left: 6,
+                  right: 6,
+                  bottom: 6,
+                  zIndex: 3,
+                  background: 'rgba(88,166,255,.16)',
+                  border: '1px solid rgba(88,166,255,.6)',
+                  borderRadius: 6,
+                  padding: '5px 8px',
+                  font: `400 10.5px ${NODE_SANS}`,
+                  color: C.text,
+                  lineHeight: 1.4,
+                  backdropFilter: 'blur(2px)',
+                  cursor: 'pointer'
+                }}
+              >
+                <b style={{ color: '#58a6ff' }}>Источник [{flashCite.n}] · стр. {flashCite.page}:</b>{' '}
+                {flashCite.text.slice(0, 200)}
+                {flashCite.text.length > 200 ? '…' : ''}
+              </div>
+            )}
             {/* сохранённые хайлайты текущей страницы */}
             {highlights
               .filter((h) => h.page === page)
@@ -6044,6 +6676,30 @@ function PdfNodeBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }
                 <div style={{ fontSize: 11.5 }}>
                   <MarkdownView content={qa.answer} />
                 </div>
+                {qa.sources && qa.sources.length > 0 && (
+                  <div style={{ marginTop: 4, display: 'flex', flexWrap: 'wrap', gap: 4, alignItems: 'center' }}>
+                    <span style={{ fontSize: 10, color: C.textDim }}>Источники:</span>
+                    {qa.sources.map((s) => (
+                      <button
+                        key={s.n}
+                        onClick={() => goToCitation(s)}
+                        onPointerDown={stopEventPropagation}
+                        title={`Перейти на стр. ${s.page}`}
+                        style={{
+                          font: `600 10px ${NODE_MONO}`,
+                          color: '#58a6ff',
+                          background: 'rgba(88,166,255,.12)',
+                          border: '1px solid rgba(88,166,255,.35)',
+                          borderRadius: 5,
+                          padding: '1px 6px',
+                          cursor: 'pointer'
+                        }}
+                      >
+                        [{s.n}] с.{s.page}
+                      </button>
+                    ))}
+                  </div>
+                )}
               </div>
             ))}
             {asking && (
@@ -9226,6 +9882,223 @@ function NodeView({
 }
 
 // Свитч тела ноды по типу — используется и в обычной ноде, и в полноэкранном режиме.
+// ---------- Таймлайн доски: ось (год/месяц/неделя/открытая зона) ----------
+function TlAxisBody({ shape }: { shape: FlowNodeShape }) {
+  let ex: { label?: string; level?: string } = {}
+  try {
+    ex = JSON.parse(shape.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const level = ex.level || 'week'
+  const label = ex.label || ''
+  if (level === 'open') {
+    return (
+      <div style={{ height: '100%', border: `2px dashed ${C.border}`, borderRadius: 14, position: 'relative', background: 'rgba(148,163,184,0.04)', pointerEvents: 'none' }}>
+        <div style={{ position: 'absolute', top: 12, left: 16, font: `600 14px ${NODE_SANS}`, color: C.textDim, letterSpacing: '.04em' }}>🗂 {label || 'Свободная зона'}</div>
+      </div>
+    )
+  }
+  const bg = level === 'year' ? 'rgba(71,85,105,0.38)' : level === 'month' ? 'rgba(71,85,105,0.24)' : 'rgba(71,85,105,0.13)'
+  return (
+    <div style={{ height: '100%', display: 'grid', placeItems: 'center', background: bg, borderRadius: 6, overflow: 'hidden', pointerEvents: 'none' }}>
+      <div style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)', font: `600 ${level === 'year' ? 13 : 12}px ${NODE_SANS}`, color: C.text, whiteSpace: 'nowrap', letterSpacing: '.06em' }}>{label}</div>
+    </div>
+  )
+}
+
+// ---------- Таймлайн доски: широкая полоса-день с выжимкой контекста ----------
+function DayLaneBody({ shape, editor }: { shape: FlowNodeShape; editor: Editor }) {
+  let ex: { iso?: string; boardId?: string } = {}
+  try {
+    ex = JSON.parse(shape.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const boardId = ex.boardId || ''
+  const iso = ex.iso || ''
+  const [busy, setBusy] = useState(false)
+  const [note, setNote] = useState('')
+
+  // Выжимка дня: собрать контент нод, попадающих в полосу → выжимка (с учётом прошлой
+  // памяти) → в память доски. Так «конец дня» передаётся в следующий день накопительно.
+  const digest = async (): Promise<void> => {
+    if (busy) return
+    setBusy(true)
+    setNote('Собираю выжимку дня…')
+    try {
+      const b = editor.getShapePageBounds(shape.id)
+      if (!b) throw new Error('нет границ полосы')
+      const parts: string[] = []
+      for (const s of editor.getCurrentPageShapes()) {
+        if (s.type !== 'flow-node' || s.id === shape.id) continue
+        const fs = s as FlowNodeShape
+        if (fs.props.kind === 'daylane' || fs.props.kind === 'tlaxis' || fs.props.kind === 'boardmem') continue
+        const sb = editor.getShapePageBounds(s.id)
+        if (!sb) continue
+        const cy = sb.y + sb.h / 2
+        const cx = sb.x + sb.w / 2
+        // центр ноды попадает в вертикальный диапазон дня и правее левого края полосы
+        if (cy >= b.y && cy < b.y + b.h && cx >= b.x - 40) {
+          const ctx = extractNodeContext(editor, fs)
+          if (ctx) parts.push(ctx)
+        }
+      }
+      const content = parts.join('\n\n').slice(0, 12000)
+      if (!content) {
+        setNote('В этом дне нет контента для выжимки')
+        return
+      }
+      const prior = boardMemText(boardId).slice(-6000)
+      const res = await window.flow.aiChat({
+        model: '',
+        messages: [
+          {
+            role: 'system',
+            content:
+              'Ты ведёшь ГЛОБАЛЬНУЮ ПАМЯТЬ проекта на доске. По содержимому за день сделай сжатую выжимку (5–10 пунктов): ' +
+              'что сделано, ключевые решения/факты/файлы, что важно помнить дальше. По-русски, по пунктам. ' +
+              'Учитывай прошлую память для связности, но НЕ повторяй её — фиксируй только НОВОЕ за этот день.'
+          },
+          { role: 'user', content: `ПРОШЛАЯ ПАМЯТЬ ПРОЕКТА:\n${prior || '(пусто)'}\n\nСОДЕРЖИМОЕ ДНЯ ${iso}:\n${content}` }
+        ],
+        timeoutMs: 90000
+      })
+      if (!res.ok) throw new Error(res.error)
+      appendBoardMem(boardId, { date: iso, text: res.content.trim(), ts: Date.now() })
+      setNote('Выжимка добавлена в память доски ✓')
+    } catch (e) {
+      setNote('Ошибка: ' + (e as Error).message)
+    } finally {
+      setBusy(false)
+      setTimeout(() => setNote(''), 4000)
+    }
+  }
+
+  return (
+    <div style={{ height: '100%', display: 'flex', flexDirection: 'column' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, padding: '6px 14px', borderBottom: `1px solid ${C.border}`, background: 'rgba(100,116,139,0.10)' }}>
+        <span style={{ font: `700 15px ${NODE_SANS}`, color: C.text, whiteSpace: 'nowrap' }}>{shape.props.title}</span>
+        <div style={{ flex: 1 }} />
+        {note && <span style={{ font: `500 11px ${NODE_SANS}`, color: C.textDim, whiteSpace: 'nowrap' }}>{note}</span>}
+        <button
+          onClick={digest}
+          onPointerDown={stopEventPropagation}
+          disabled={busy}
+          style={{ border: 'none', background: KINDS.boardmem.grad, color: '#04121f', fontWeight: 700, borderRadius: 8, fontSize: 12, padding: '6px 12px', cursor: busy ? 'default' : 'pointer', opacity: busy ? 0.6 : 1, fontFamily: NODE_SANS, whiteSpace: 'nowrap' }}
+          title="Собрать выжимку контента этого дня в память доски (передаётся следующим дням)"
+        >
+          {busy ? '…' : '🧠 Выжимка дня → память'}
+        </button>
+      </div>
+      {/* остальная площадь полосы — свободная зона для файлов/нод этого дня */}
+      <div style={{ flex: 1 }} />
+    </div>
+  )
+}
+
+// ---------- Память доски: накопленные дневные выжимки ----------
+function BoardMemBody({ shape }: { shape: FlowNodeShape }) {
+  let ex: { boardId?: string } = {}
+  try {
+    ex = JSON.parse(shape.props.extra || '{}')
+  } catch {
+    /* ignore */
+  }
+  const boardId = ex.boardId || ''
+  const [, force] = useState(0)
+  useEffect(() => {
+    const h = (e: Event): void => {
+      if ((e as CustomEvent).detail === (boardId || 'default')) force((n) => n + 1)
+    }
+    window.addEventListener('flow-boardmem-updated', h)
+    // Если кэш этой доски ещё не загружен из БД — подтянуть (событие вызовет перерисовку).
+    if (!isBoardMemHydrated(boardId)) void hydrateBoardMem(boardId)
+    return () => window.removeEventListener('flow-boardmem-updated', h)
+  }, [boardId])
+  const list = readBoardMem(boardId)
+  return (
+    <div onPointerDown={stopEventPropagation} onWheelCapture={stopEventPropagation} style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}>
+      <div style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}`, font: `700 13px ${NODE_SANS}`, color: C.text }}>
+        🧠 Память доски · {list.length} дн.
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '9px 12px', display: 'flex', flexDirection: 'column', gap: 11 }}>
+        {list.length === 0 && (
+          <div style={{ font: `400 12px ${NODE_SANS}`, color: C.textDim, lineHeight: 1.5 }}>
+            Пусто. На любой дневной полосе нажми «🧠 Выжимка дня» — итог накопится здесь и будет
+            передаваться следующим дням. Соедини эту ноду стрелкой с ИИ/оркестратором — он увидит всю память доски.
+          </div>
+        )}
+        {list.map((e, i) => (
+          <div key={i} style={{ borderLeft: `3px solid ${e.scope === 'month' ? '#F59E0B' : e.scope === 'week' ? '#60A5FA' : KINDS.boardmem.color}`, paddingLeft: 10 }}>
+            <div style={{ font: `600 11px ${NODE_MONO}`, color: C.textDim, marginBottom: 3 }}>
+              {e.scope === 'week' ? '🗓 ' : e.scope === 'month' ? '📅 ' : ''}
+              {e.date}
+            </div>
+            <div style={{ font: `400 12px ${NODE_SANS}`, color: C.text, whiteSpace: 'pre-wrap', lineHeight: 1.42 }}>{e.text}</div>
+          </div>
+        ))}
+      </div>
+    </div>
+  )
+}
+
+// T1.2: заглушка для ноды с повреждённым extra (невалидный JSON/не-объект). Данные не
+// теряются — показываем kind и свёрнутый сырой JSON, холст продолжает работать.
+function CorruptedBody({ shape }: { shape: FlowNodeShape }) {
+  const [open, setOpen] = useState(false)
+  const raw = corruptRaw(String(shape.id)) || shape.props.extra || ''
+  return (
+    <div
+      onPointerDown={stopEventPropagation}
+      onWheelCapture={stopEventPropagation}
+      style={{ height: '100%', display: 'flex', flexDirection: 'column', overflow: 'hidden' }}
+    >
+      <div style={{ padding: '7px 12px', borderBottom: `1px solid ${C.border}`, font: `700 13px ${NODE_SANS}`, color: '#EF4444' }}>
+        ⚠ Повреждённые данные · {KIND_NAME[shape.props.kind] || shape.props.kind}
+      </div>
+      <div style={{ flex: 1, overflow: 'auto', padding: '9px 12px', display: 'flex', flexDirection: 'column', gap: 8 }}>
+        <div style={{ font: `400 12px ${NODE_SANS}`, color: C.textDim, lineHeight: 1.5 }}>
+          Не удалось разобрать данные ноды (`extra`). Ничего не потеряно — исходное содержимое ниже.
+          Холст и остальные ноды работают как обычно.
+        </div>
+        <button
+          onClick={() => setOpen((v) => !v)}
+          style={{
+            alignSelf: 'flex-start',
+            font: `600 11px ${NODE_SANS}`,
+            color: C.text,
+            background: C.field,
+            border: `1px solid ${C.border}`,
+            borderRadius: 6,
+            padding: '3px 9px',
+            cursor: 'pointer'
+          }}
+        >
+          {open ? 'Скрыть сырые данные' : 'Показать сырые данные'}
+        </button>
+        {open && (
+          <pre
+            style={{
+              font: `400 11px ${NODE_MONO}`,
+              color: C.textDim,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-all',
+              margin: 0,
+              background: C.field,
+              border: `1px solid ${C.border}`,
+              borderRadius: 6,
+              padding: 8
+            }}
+          >
+            {raw}
+          </pre>
+        )}
+      </div>
+    </div>
+  )
+}
+
 function NodeBodySwitch({
   shape,
   editor,
@@ -9238,6 +10111,7 @@ function NodeBodySwitch({
   full?: boolean
 }) {
   const kind = shape.props.kind
+  if (isExtraCorrupt(String(shape.id))) return <CorruptedBody shape={shape} />
   return kind === 'ai' ? (
     <AiBody shape={shape} editor={editor} />
   ) : kind === 'kanban' ? (
@@ -9272,6 +10146,12 @@ function NodeBodySwitch({
     <OpenscienceBody shape={shape} editor={editor} />
   ) : kind === 'webgpt' || kind === 'webgemini' || kind === 'webglm' ? (
     <WebLLMBody shape={shape} editor={editor} />
+  ) : kind === 'daylane' ? (
+    <DayLaneBody shape={shape} editor={editor} />
+  ) : kind === 'tlaxis' ? (
+    <TlAxisBody shape={shape} />
+  ) : kind === 'boardmem' ? (
+    <BoardMemBody shape={shape} />
   ) : kind === 'notebook' ? (
     <NotebookBody shape={shape} editor={editor} />
   ) : kind === 'pdf' ? (

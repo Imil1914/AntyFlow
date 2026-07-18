@@ -36,6 +36,13 @@ declare global {
         elsevierInsttoken: string
         unpaywallEmail: string
         anythingllmKey: string
+        ragHybrid: boolean
+        ragTopN: number
+        ragReranker: boolean
+        memoryRetrieval: boolean
+        memoryContextBudget: number
+        memoryRecentDays: number
+        memoryTopK: number
       }>
       saveSettings: (s: {
         defaultModel?: string
@@ -47,6 +54,13 @@ declare global {
         elsevierInsttoken?: string
         unpaywallEmail?: string
         anythingllmKey?: string
+        ragHybrid?: boolean
+        ragTopN?: number
+        ragReranker?: boolean
+        memoryRetrieval?: boolean
+        memoryContextBudget?: number
+        memoryRecentDays?: number
+        memoryTopK?: number
       }) => Promise<{ ok: boolean; error?: string }>
       servicesStatus: () => Promise<{ comfy: boolean; lm: boolean }>
       startService: (args: { name: 'comfy' | 'lm' }) => Promise<{ ok: true }>
@@ -189,8 +203,9 @@ declare global {
         error: string
       }>
       anythingStop: () => Promise<{ ok: true }>
-      anythingIngest: (args: { base64: string; name: string }) => Promise<{ ok: boolean; error?: string; location?: string }>
+      anythingIngest: (args: { base64: string; name: string; workspace?: string }) => Promise<{ ok: boolean; error?: string; location?: string }>
       anythingRemove: (args: { location: string }) => Promise<{ ok: boolean; error?: string }>
+      anythingWorkspaces: () => Promise<{ ok: boolean; error?: string; workspaces?: Array<{ name: string; slug: string }> }>
       onOrchCreateNodes: (
         cb: (payload: {
           projectId: string
@@ -223,7 +238,7 @@ declare global {
         id: string
         chunks: Array<{ id: string; page: number; text: string; vector: number[] }>
       }) => Promise<{ ok: true; total: number } | { ok: false; error: string }>
-      pdfSearch: (args: { id: string; vector: number[]; topK?: number }) => Promise<
+      pdfSearch: (args: { id: string; vector: number[]; topK?: number; query?: string }) => Promise<
         { ok: true; chunks: Array<{ page: number; text: string; score: number }> } | { ok: false; error: string }
       >
       pdfIndexed: (args: { id: string }) => Promise<{ ok: true; indexed: boolean; count: number }>
@@ -236,7 +251,9 @@ declare global {
         queryVector?: number[]
         selection?: string
         imageDataUrl?: string
-      }) => Promise<{ ok: true; text: string } | { ok: false; error: string }>
+      }) => Promise<
+        { ok: true; text: string; sources?: Array<{ n: number; page: number; text: string }> } | { ok: false; error: string }
+      >
       onPdfStream: (
         cb: (m: {
           channel: 'token' | 'done' | 'error'
@@ -244,6 +261,7 @@ declare global {
           delta?: string
           text?: string
           error?: string
+          sources?: Array<{ n: number; page: number; text: string }>
         }) => void
       ) => () => void
       // Meta-Orchestrator
@@ -315,9 +333,71 @@ declare global {
       canvasRemove: (args: { key: string }) => Promise<{ ok: boolean }>
       canvasBoardsRead: () => Promise<{ boards: Array<{ id: string; name: string; key: string }>; updatedAt: number } | null>
       canvasBoardsWrite: (args: { boards: unknown; updatedAt: number }) => Promise<{ ok: boolean; error?: string }>
+      // Локальная БД: память доски и пер-борд мета (T1.1)
+      memory: {
+        list: (args: { boardId: string }) => Promise<DbResult<MemoryEntry[]>>
+        get: (args: { boardId: string; periodKind?: PeriodKind; periodKey: string }) => Promise<DbResult<MemoryEntry | null>>
+        upsert: (args: {
+          boardId: string
+          periodKind?: PeriodKind
+          periodKey: string
+          content: string
+          ts?: number
+        }) => Promise<DbResult<MemoryEntry>>
+        delete: (args: { boardId: string; periodKind?: PeriodKind; periodKey: string }) => Promise<
+          DbResult<{ ok: true; deleted: number }>
+        >
+        search: (args: { query: string; boardId?: string; limit?: number }) => Promise<DbResult<MemorySearchHit[]>>
+        embList: (args: { boardId: string }) => Promise<
+          DbResult<Array<{ periodKind: PeriodKind; periodKey: string; vector: number[] }>>
+        >
+        embSet: (args: { boardId: string; periodKind?: PeriodKind; periodKey: string; vector: number[] }) => Promise<
+          DbResult<{ ok: true }>
+        >
+      }
+      boardmeta: {
+        get: (args: { boardId: string; key: string }) => Promise<DbResult<string | null>>
+        getAll: (args: { boardId: string }) => Promise<DbResult<Record<string, string>>>
+        set: (args: { boardId: string; key: string; value: string }) => Promise<DbResult<{ ok: true }>>
+      }
+      nodes: {
+        reindex: (args: {
+          boardId: string
+          boardName?: string
+          nodes: { shapeId: string; kind?: string; title?: string; body?: string }[]
+        }) => Promise<DbResult<{ ok: true; count: number }>>
+        deleteBoard: (args: { boardId: string }) => Promise<DbResult<{ ok: true }>>
+        search: (args: { query: string; limit?: number }) => Promise<DbResult<NodeSearchHit[]>>
+      }
+      dbStatus: () => Promise<{ ok: boolean; recreated: boolean; error?: string }>
+      dbImportLocalDump: (args: {
+        memory: { boardId: string; periodKind?: PeriodKind; periodKey: string; content: string; ts?: number }[]
+        meta: { boardId: string; key: string; value: string }[]
+        rawDump?: string
+      }) => Promise<DbResult<{ ok: true; memory: number; meta: number }>>
     }
   }
 }
+
+export type PeriodKind = 'day' | 'week' | 'month'
+export type MemoryEntry = {
+  boardId: string
+  periodKind: PeriodKind
+  periodKey: string
+  content: string
+  createdAt: number
+  updatedAt: number
+}
+export type MemorySearchHit = MemoryEntry & { snippet: string }
+export type NodeSearchHit = {
+  boardId: string
+  boardName: string
+  shapeId: string
+  kind: string
+  title: string
+  snippet: string
+}
+export type DbResult<T> = { ok: true; data: T } | { ok: false; error: string }
 
 export type VaultEntry = {
   name: string

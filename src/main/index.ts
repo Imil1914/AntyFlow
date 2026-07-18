@@ -2,18 +2,43 @@ import { app, BrowserWindow, ipcMain, shell, dialog, Menu, type WebContents } fr
 import { join } from 'path'
 import { spawn } from 'child_process'
 import * as pty from '@homebridge/node-pty-prebuilt-multiarch'
-import { ensureAnything, anyState, stopAnything, onAnyProgress, ingestDocument, removeDocument } from './anythingllm'
+import { ensureAnything, anyState, stopAnything, onAnyProgress, ingestDocument, removeDocument, listWorkspaces } from './anythingllm'
 import { ensureOpenscience, opensciState, stopOpenscience, onOpensciProgress } from './openscience'
 import { registerNotebookIpc, stopAllKernels } from './notebook'
-import { registerPdfIpc, searchPdf } from './pdf'
+import { registerPdfIpc, searchPdfHybrid } from './pdf'
 import { registerOrchestratorIpc, stopAllOrchestrations } from './orchestrator'
 import { registerVaultIpc, stopVaultWatcher } from './vault'
 import { registerCanvasSyncIpc } from './canvas-sync'
 import { registerPapersIpc, searchPapersDirect, fetchPaperPdfDirect } from './papers'
 import { opencodeBin } from './sidecars'
+import { z } from 'zod'
+import {
+  getDb,
+  closeDb,
+  getDbStatus,
+  memoryList,
+  memoryGet,
+  memoryUpsert,
+  memoryDelete,
+  memorySearch,
+  boardMetaGet,
+  boardMetaGetAll,
+  boardMetaSet,
+  importLocalDump,
+  nodesReindexBoard,
+  nodesDeleteBoard,
+  nodesSearch,
+  memEmbList,
+  memEmbSet,
+  memEmbDelete,
+  type PeriodKind
+} from './db'
 
 registerNotebookIpc()
-registerPdfIpc()
+registerPdfIpc(() => {
+  const s = getSettings()
+  return { hybrid: s.ragHybrid !== false, topN: s.ragTopN || 8 }
+})
 registerVaultIpc()
 registerCanvasSyncIpc()
 // Ключи научных источников берём из settings.json в момент запроса.
@@ -37,7 +62,7 @@ registerOrchestratorIpc({
   },
   anythingIngest: (a) => ingestDocument(a.base64, a.name, getSettings().anythingllmKey)
 })
-import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync } from 'fs'
+import { mkdtempSync, writeFileSync, readFileSync, rmSync, existsSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import JSZip from 'jszip'
 import { PDFParse } from 'pdf-parse'
@@ -108,6 +133,17 @@ type Settings = {
   elsevierInsttoken: string // institutional token (для полного текста вне сети института)
   unpaywallEmail: string // email для Unpaywall (легальный бесплатный PDF по DOI)
   anythingllmKey: string // API-ключ AnythingLLM (для загрузки статей в базу знаний)
+  // T2.1: PDF-RAG. rag.hybrid — BM25+эмбеддинги+RRF (по умолчанию вкл);
+  // rag.topN — сколько чанков отдавать (по умолчанию 8); rag.reranker — опц. реранкер (выкл).
+  ragHybrid: boolean
+  ragTopN: number
+  ragReranker: boolean
+  // T2.4: память доски через retrieval. memory.retrieval — подтягивать релевантное, а не всё
+  // (по умолчанию вкл; при отсутствии эмбеддингов — мягко деградирует). budget — токен-бюджет.
+  memoryRetrieval: boolean
+  memoryContextBudget: number
+  memoryRecentDays: number
+  memoryTopK: number
 }
 const DEFAULT_SETTINGS: Settings = {
   defaultModel: '',
@@ -118,7 +154,14 @@ const DEFAULT_SETTINGS: Settings = {
   elsevierKey: '',
   elsevierInsttoken: '',
   unpaywallEmail: '',
-  anythingllmKey: ''
+  anythingllmKey: '',
+  ragHybrid: true,
+  ragTopN: 8,
+  ragReranker: false,
+  memoryRetrieval: true,
+  memoryContextBudget: 4000,
+  memoryRecentDays: 7,
+  memoryTopK: 6
 }
 function settingsPath() {
   return join(app.getPath('userData'), 'settings.json')
@@ -139,6 +182,151 @@ ipcMain.handle('settings:set', (_e, s: Partial<Settings>) => {
   } catch (e) {
     return { ok: false, error: String(e) }
   }
+})
+
+// --- Локальная БД: память доски и пер-борд мета (T1.1) ---
+// Renderer не доверенный: валидируем все пейлоады zod'ом прямо в main.
+const zPeriodKind = z.enum(['day', 'week', 'month'])
+const zBoardId = z.string().min(1).max(200)
+const zMemoryUpsert = z.object({
+  boardId: zBoardId,
+  periodKind: zPeriodKind.default('day'),
+  periodKey: z.string().min(1).max(500),
+  content: z.string().max(200000),
+  ts: z.number().finite().optional()
+})
+const zMemoryKey = z.object({ boardId: zBoardId, periodKind: zPeriodKind.default('day'), periodKey: z.string().min(1).max(500) })
+const zMemorySearch = z.object({ query: z.string().max(1000), boardId: zBoardId.optional(), limit: z.number().int().positive().max(200).optional() })
+const zMetaGet = z.object({ boardId: zBoardId, key: z.string().min(1).max(200) })
+const zMetaSet = zMetaGet.extend({ value: z.string().max(20000) })
+const zLocalDump = z.object({
+  memory: z
+    .array(
+      z.object({
+        boardId: zBoardId,
+        periodKind: zPeriodKind.default('day'),
+        periodKey: z.string().min(1).max(500),
+        content: z.string().max(200000),
+        ts: z.number().finite().optional()
+      })
+    )
+    .max(100000),
+  meta: z.array(z.object({ boardId: zBoardId, key: z.string().min(1).max(200), value: z.string().max(20000) })).max(100000),
+  // Сырой дамп исходных ключей localStorage — сохраняем в backup/ до импорта.
+  rawDump: z.string().max(50_000_000).optional()
+})
+
+// Обёртка: любые сбои БД не пробрасываются исключением в renderer, а возвращаются как { ok:false }.
+function dbSafe<T>(fn: () => T): { ok: true; data: T } | { ok: false; error: string } {
+  try {
+    return { ok: true, data: fn() }
+  } catch (e) {
+    console.error('[db] IPC error:', e)
+    return { ok: false, error: String((e as Error)?.message || e) }
+  }
+}
+
+ipcMain.handle('db:status', () => getDbStatus())
+ipcMain.handle('memory:list', (_e, a: { boardId: string }) =>
+  dbSafe(() => memoryList(zBoardId.parse(a?.boardId)))
+)
+ipcMain.handle('memory:get', (_e, a: unknown) => {
+  const p = zMemoryKey.parse(a)
+  return dbSafe(() => memoryGet(p.boardId, p.periodKind as PeriodKind, p.periodKey))
+})
+ipcMain.handle('memory:upsert', (_e, a: unknown) => {
+  const p = zMemoryUpsert.parse(a)
+  return dbSafe(() =>
+    memoryUpsert({
+      boardId: p.boardId,
+      periodKind: p.periodKind as PeriodKind,
+      periodKey: p.periodKey,
+      content: p.content,
+      createdAt: p.ts,
+      updatedAt: p.ts
+    })
+  )
+})
+ipcMain.handle('memory:delete', (_e, a: unknown) => {
+  const p = zMemoryKey.parse(a)
+  return dbSafe(() => {
+    try {
+      memEmbDelete(p.boardId, p.periodKind as PeriodKind, p.periodKey) // T2.4: убрать эмбеддинг
+    } catch {
+      /* ignore */
+    }
+    return memoryDelete(p.boardId, p.periodKind as PeriodKind, p.periodKey)
+  })
+})
+// T2.4: эмбеддинги памяти доски (renderer считает векторы, main хранит).
+const zEmbSet = z.object({
+  boardId: zBoardId,
+  periodKind: zPeriodKind.default('day'),
+  periodKey: z.string().min(1).max(500),
+  vector: z.array(z.number().finite()).min(1).max(4096)
+})
+ipcMain.handle('memory:embList', (_e, a: { boardId: string }) => dbSafe(() => memEmbList(zBoardId.parse(a?.boardId))))
+ipcMain.handle('memory:embSet', (_e, a: unknown) => {
+  const p = zEmbSet.parse(a)
+  return dbSafe(() => memEmbSet(p.boardId, p.periodKind as PeriodKind, p.periodKey, p.vector))
+})
+ipcMain.handle('memory:search', (_e, a: unknown) => {
+  const p = zMemorySearch.parse(a)
+  return dbSafe(() => memorySearch(p.query, { boardId: p.boardId, limit: p.limit }))
+})
+ipcMain.handle('boardmeta:get', (_e, a: unknown) => {
+  const p = zMetaGet.parse(a)
+  return dbSafe(() => boardMetaGet(p.boardId, p.key))
+})
+ipcMain.handle('boardmeta:getAll', (_e, a: { boardId: string }) =>
+  dbSafe(() => boardMetaGetAll(zBoardId.parse(a?.boardId)))
+)
+ipcMain.handle('boardmeta:set', (_e, a: unknown) => {
+  const p = zMetaSet.parse(a)
+  return dbSafe(() => boardMetaSet(p.boardId, p.key, p.value))
+})
+// --- Глобальный поиск по нодам (T4.1) ---
+const zNodeItem = z.object({
+  shapeId: z.string().min(1).max(200),
+  kind: z.string().max(100).default(''),
+  title: z.string().max(5000).default(''),
+  body: z.string().max(200000).default('')
+})
+const zNodesReindex = z.object({
+  boardId: zBoardId,
+  boardName: z.string().max(500).default(''),
+  nodes: z.array(zNodeItem).max(20000)
+})
+const zNodesSearch = z.object({ query: z.string().max(1000), limit: z.number().int().positive().max(200).optional() })
+
+ipcMain.handle('nodes:reindex', (_e, a: unknown) => {
+  const p = zNodesReindex.parse(a)
+  return dbSafe(() => nodesReindexBoard(p.boardId, p.boardName, p.nodes))
+})
+ipcMain.handle('nodes:deleteBoard', (_e, a: { boardId: string }) =>
+  dbSafe(() => nodesDeleteBoard(zBoardId.parse(a?.boardId)))
+)
+ipcMain.handle('nodes:search', (_e, a: unknown) => {
+  const p = zNodesSearch.parse(a)
+  return dbSafe(() => nodesSearch(p.query, { limit: p.limit }))
+})
+
+ipcMain.handle('db:importLocalDump', (_e, a: unknown) => {
+  const p = zLocalDump.parse(a)
+  return dbSafe(() => {
+    // Бэкап исходника ДО записи в БД (по требованию T1.1).
+    if (p.rawDump) {
+      try {
+        const dir = join(app.getPath('userData'), 'backup')
+        if (!existsSync(dir)) mkdirSync(dir, { recursive: true })
+        const stamp = new Date().toISOString().replace(/[:.]/g, '-')
+        writeFileSync(join(dir, `localStorage-${stamp}.json`), p.rawDump, 'utf-8')
+      } catch (e) {
+        console.error('[db] backup dump failed:', e)
+      }
+    }
+    return importLocalDump({ memory: p.memory, meta: p.meta })
+  })
 })
 
 // --- Автозапуск локальных сервисов (ComfyUI, LM Studio) ---
@@ -517,7 +705,14 @@ ipcMain.handle('anythingllm:stop', async () => {
   stopAnything()
   return { ok: true as const }
 })
-ipcMain.handle('anythingllm:ingest', async (_e, args: { base64: string; name: string }) => {
+ipcMain.handle('anythingllm:workspaces', async () => {
+  const key = getSettings().anythingllmKey
+  if (!key) return { ok: false as const, error: 'Не указан API-ключ AnythingLLM (⚙ Настройки)' }
+  const st = await anyState()
+  if (!st.running) return { ok: false as const, error: 'AnythingLLM не запущен' }
+  return listWorkspaces(key)
+})
+ipcMain.handle('anythingllm:ingest', async (_e, args: { base64: string; name: string; workspace?: string }) => {
   const key = getSettings().anythingllmKey
   if (!key) return { ok: false, error: 'Не указан API-ключ AnythingLLM (⚙ Настройки → Научные источники)' }
   // Авто-запуск сервера, если он ещё не поднят.
@@ -537,7 +732,7 @@ ipcMain.handle('anythingllm:ingest', async (_e, args: { base64: string; name: st
       }
     }
   }
-  return ingestDocument(args.base64, args.name, key)
+  return ingestDocument(args.base64, args.name, key, args.workspace || 'Flow')
 })
 
 // Убрать документ из RAG AnythingLLM (при удалении ноды-статьи с доски).
@@ -599,12 +794,18 @@ ipcMain.handle(
       send('pdf:error', { reqId: args.reqId, error: 'Провайдер не настроен (проверь ⚙ Настройки)' })
       return { ok: false as const, error: 'Провайдер не настроен' }
     }
-    // RAG строго внутри этого PDF
-    const ctxChunks = args.queryVector?.length ? searchPdf(args.pdfId, args.queryVector, 5) : []
-    const ctx = ctxChunks.map((c) => `[стр. ${c.page}] ${c.text}`).join('\n\n')
+    // RAG строго внутри этого PDF. T2.1: гибрид (BM25+вектор+RRF) по тексту вопроса,
+    // с мягкой деградацией к чисто векторному при выключённом флаге / отсутствии текста.
+    const ragS = getSettings()
+    const ctxChunks = searchPdfHybrid(args.pdfId, args.queryVector, args.question || '', {
+      hybrid: ragS.ragHybrid !== false,
+      topN: ragS.ragTopN || 8
+    })
+    // T2.2: нумеруем источники [1]…[n] с указанием страниц — модель ставит маркеры [n].
+    const ctx = ctxChunks.map((c, i) => `[${i + 1}] (стр. ${c.page}) ${c.text}`).join('\n\n')
     const userText =
       (args.selection ? `Выделенный фрагмент документа:\n"""\n${args.selection}\n"""\n\n` : '') +
-      (ctx ? `Дополнительный контекст из этого же PDF:\n${ctx}\n\n` : '') +
+      (ctx ? `Пронумерованные источники из этого же PDF:\n${ctx}\n\n` : '') +
       `Вопрос: ${args.question}`
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const userContent: any = args.imageDataUrl
@@ -618,7 +819,10 @@ ipcMain.handle(
         role: 'system',
         content:
           'Ты помогаешь пользователю понять фрагмент PDF-документа. Отвечай по существу, опираясь на ' +
-          'выделенный фрагмент и приведённый контекст из того же документа. Если данных не хватает — скажи прямо.'
+          'выделенный фрагмент и приведённые пронумерованные источники из того же документа. ' +
+          'После утверждений, взятых из источников, СТАВЬ маркеры вида [1], [2] с номером источника ' +
+          '(можно несколько: [1][3]). Не выдумывай источники сверх приведённых. ' +
+          'Если данных не хватает — скажи прямо.'
       },
       { role: 'user', content: userContent }
     ]
@@ -660,8 +864,10 @@ ipcMain.handle(
           }
         }
       }
-      send('pdf:done', { reqId: args.reqId, text: full })
-      return { ok: true as const, text: full }
+      // T2.2: отдаём источники (номер → страница + якорный текст для подсветки).
+      const sources = ctxChunks.map((c, i) => ({ n: i + 1, page: c.page, text: (c.text || '').slice(0, 400) }))
+      send('pdf:done', { reqId: args.reqId, text: full, sources })
+      return { ok: true as const, text: full, sources }
     } catch (err) {
       send('pdf:error', { reqId: args.reqId, error: String(err) })
       return { ok: false as const, error: String(err) }
@@ -697,6 +903,7 @@ app.on('will-quit', () => {
   stopAllKernels()
   stopAllOrchestrations()
   stopVaultWatcher()
+  closeDb()
 })
 
 const COMFY_URLS = ['http://127.0.0.1:8188/system_stats', 'http://127.0.0.1:8000/system_stats']
@@ -1541,6 +1748,13 @@ if (!gotLock) {
     // undo…) перехватывали сочетания до нашего кода. Chromium сам обрабатывает
     // копирование/вставку/отмену в текстовых полях, так что ввод текста не страдает.
     Menu.setApplicationMenu(null)
+    // Инициализируем БД заранее (миграции/пересоздание при повреждении); сбой не
+    // мешает старту — память доски мягко деградирует, статус доступен через db:status.
+    try {
+      getDb()
+    } catch (e) {
+      console.error('[db] init failed:', e)
+    }
     createWindow()
     // Подключаем MCP-серверы в фоне, чтобы инструменты были готовы
     ensureConnected().catch(() => {})
