@@ -14,8 +14,9 @@ Plane-powered · AntyFlow-faced · Vault-backed · Graph/RAG-assisted · Git-con
 - **целевая система** — многокомандный web-продукт PPM с Plane Community как внутренним движком;
 - **актуальное ТЗ** — редакция Intelligence-first v3;
 - **I0.1 принята** — чистый Plane `v1.4.2` закреплён, а golden path и persistence после restart подтверждены CI;
-- **I0.2 готова к review владельца** — добавлены обратимые PPM brand foundation, Graphite/Light tokens и legal/source surface;
-- **следующая задача после приёмки I0.2** — PPM shell, русская локализация и первый вход по карточке I0.3.
+- **I0.3 принята владельцем** — PPM shell, русский first path, единый login и role-safe project navigation зафиксированы отдельными локальными коммитами;
+- **I0.4 принята владельцем** — открыт browser-safe `Мозг проекта` на tldraw с note/group, визуальными стрелками, project-scoped local persistence и read-only режимом;
+- **следующая задача** — серверное хранение Canvas, версии и права по карточке I0.5.
 
 Это важно: существующий Electron-код не выдаётся за готовую web-платформу. Он служит проверенным источником Canvas, Vault, графа, AI-нод и других функций, которые будут переноситься поэтапно.
 
@@ -139,7 +140,7 @@ AGENTS.md                  обязательные правила для Codex 
 5. Реализовать изменение, выполнить указанные проверки и оформить небольшой reviewable commit.
 6. Не ставить `accepted` самостоятельно: финальную приёмку делает владелец.
 
-Следующая исполнительная карточка после review I0.2: [I0.3 — PPM shell, русская локализация и первый вход](<docs/project-spec/Документация PPM/Intelligence-first/tasks/I0.3 — PPM shell, русская локализация и первый вход.md>).
+Следующая карточка: [I0.5 — Canvas persistence, версии и права](<docs/project-spec/Документация PPM/Intelligence-first/tasks/I0.5 — Canvas persistence, версии и права.md>).
 
 ## Безопасность
 

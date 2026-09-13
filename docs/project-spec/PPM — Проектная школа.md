@@ -1,7 +1,7 @@
 ---
 id: project-intellect-ppm
 created: 2026-09-11
-updated: 2026-09-12
+updated: 2026-09-13
 type: project
 project_home: true
 project_id: intellect-ppm
@@ -15,7 +15,7 @@ related_domains:
 owner: "Мамин И."
 team:
   - Мамин
-next_action: "Реализовать I0.4: browser-safe Canvas core, note/group, visual arrows и permission-safe route Мозга проекта"
+next_action: "Начать I0.5: server persistence, версии и права Canvas"
 tags:
   - type/project
   - domain/intellect
@@ -41,8 +41,10 @@ AntyFlow-first web-платформа для 5–20 команд проектн�
 - I0.3 принята владельцем 2026-09-13 и зафиксирована отдельным локальным коммитом Plane fork; push не выполнялся.
 - Для I0.3 реализованы и проверены на работающем API PPM shell, русский first path, сохранение выбора языка, reload-safe navigation, штатный Work Item flow, runtime-варианты Guest/Viewer, Member и Admin, keyboard/focus semantics.
 - Автоматические проверки I0.3 проходят: brand tests/audit, navigation tests, typecheck, lint, production PPM build и rollback Plane build.
+- I0.4 принята владельцем 2026-09-13: browser-safe `Мозг проекта` поддерживает note/group, визуальные стрелки, локальное сохранение, project isolation и read-only режим.
+- Автоматические проверки I0.4, production/rollback builds, ручной Canvas smoke и повторный контейнерный auth/outsider smoke через Plane API проходят.
 - **Ответственный:** Мамин И.
-- **Статус:** переход к реализации I0.4.
+- **Статус:** I0.4 принята; следующая карточка — I0.5.
 
 ## Документация
 
@@ -57,13 +59,17 @@ AntyFlow-first web-платформа для 5–20 команд проектн�
 ## Следующий шаг
 
 - [ ] Провести owner review I0.1 и I0.2, не меняя их на `accepted` автоматически.
-- [ ] Реализовать I0.4 в отдельной ветке поверх принятой I0.3.
+- [x] Провести owner review I0.4; интеграционный auth/outsider smoke пройден.
+- [ ] После `accepted` начать I0.5: server persistence, версии и права Canvas.
 - [ ] Не добавлять server persistence и Work Item projection до I0.5/I0.6.
 
 ## Журнал изменений
 
 ### 2026-09-13
 
+- Владелец принял I0.4 переходом к следующему этапу.
+- После успешной загрузки закреплённого backend image повторён контейнерный auth/outsider smoke: unauthenticated получает `401`, Admin/Member/Guest — `200`, outsider — `409/404`; временные изменения ролей полностью откатились.
+- I0.4 доведена до `review`: реализован browser-safe Canvas core, note/group, visual arrows, role-aware UI и обратимый feature flag.
 - Владелец принял I0.3 переходом к следующему этапу; начата подготовка отдельной ветки I0.4.
 
 ### 2026-09-12

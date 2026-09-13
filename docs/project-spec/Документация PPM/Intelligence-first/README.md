@@ -120,7 +120,7 @@ Git-connected        — стандартный цикл разработки б
 - [Очередь задач Intelligence-first](<tasks/README.md>)
 - [Шаблон карточки](<tasks/_TEMPLATE.md>)
 
-Следующая задача: [I0.4](<tasks/I0.4 — Web Canvas route и browser-safe AntyFlow core.md>).
+[I0.4](<tasks/I0.4 — Web Canvas route и browser-safe AntyFlow core.md>) принята владельцем. Следующая задача — [I0.5](<tasks/I0.5 — Canvas persistence, версии и права.md>).
 
 ## Источники и дата проверки
 

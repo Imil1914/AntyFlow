@@ -4,7 +4,7 @@ project_id: intellect-ppm
 status: active
 version: 3
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-13
 ---
 
 # Очередь задач Intelligence-first
@@ -25,7 +25,7 @@ updated: 2026-09-12
 | [I0.1 — Fork, pin, лицензия и чистый baseline Plane](<I0.1 — Fork, pin, лицензия и чистый baseline Plane.md>) | P0 | `review` | решение владельца | Plane v1.4.2 и golden/restart gate подтверждены CI |
 | [I0.2 — PPM brand foundation и token bridge](<I0.2 — PPM brand foundation и token bridge.md>) | P0 | `planned` | I0.1 | темы/assets/components PPM |
 | [I0.3 — PPM shell, русская локализация и первый вход](<I0.3 — PPM shell, русская локализация и первый вход.md>) | P0 | `accepted` | I0.2 | пользователь не видит Plane на основном пути |
-| [I0.4 — Web Canvas route и browser-safe AntyFlow core](<I0.4 — Web Canvas route и browser-safe AntyFlow core.md>) | P0 | `planned` | I0.3 | открывается `Мозг проекта` |
+| [I0.4 — Web Canvas route и browser-safe AntyFlow core](<I0.4 — Web Canvas route и browser-safe AntyFlow core.md>) | P0 | `accepted` | I0.3 | открывается `Мозг проекта` |
 | [I0.5 — Canvas persistence, версии и права](<I0.5 — Canvas persistence, версии и права.md>) | P0 | `planned` | I0.4 | общий сохраняемый Canvas project |
 | [I0.6 — Проекция Plane Work Item на Canvas](<I0.6 — Проекция Plane Work Item на Canvas.md>) | P0 | `planned` | I0.5 | одна задача в двух представлениях |
 | [I0.7 — Project Vault Markdown и PDF MVP](<I0.7 — Project Vault Markdown и PDF MVP.md>) | P0 | `planned` | I0.3 | папки, Markdown, PDF, versions |
@@ -53,4 +53,4 @@ updated: 2026-09-12
 
 ## Следующее действие
 
-Начать I0.4: выделить browser-safe Canvas boundary, подключить совместимую версию tldraw и открыть редактируемый `Мозг проекта` без серверного persistence.
+Начать I0.5: server persistence, immutable versions, optimistic concurrency и права Canvas.
