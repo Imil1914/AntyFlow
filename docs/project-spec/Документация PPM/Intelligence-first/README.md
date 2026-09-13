@@ -120,7 +120,7 @@ Git-connected        — стандартный цикл разработки б
 - [Очередь задач Intelligence-first](<tasks/README.md>)
 - [Шаблон карточки](<tasks/_TEMPLATE.md>)
 
-Первая задача: [I0.1](<tasks/I0.1 — Fork, pin, лицензия и чистый baseline Plane.md>).
+Следующая задача: [I0.4](<tasks/I0.4 — Web Canvas route и browser-safe AntyFlow core.md>).
 
 ## Источники и дата проверки
 

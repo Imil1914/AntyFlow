@@ -24,7 +24,7 @@ updated: 2026-09-12
 |---|---:|---|---|---|
 | [I0.1 — Fork, pin, лицензия и чистый baseline Plane](<I0.1 — Fork, pin, лицензия и чистый baseline Plane.md>) | P0 | `review` | решение владельца | Plane v1.4.2 и golden/restart gate подтверждены CI |
 | [I0.2 — PPM brand foundation и token bridge](<I0.2 — PPM brand foundation и token bridge.md>) | P0 | `planned` | I0.1 | темы/assets/components PPM |
-| [I0.3 — PPM shell, русская локализация и первый вход](<I0.3 — PPM shell, русская локализация и первый вход.md>) | P0 | `planned` | I0.2 | пользователь не видит Plane на основном пути |
+| [I0.3 — PPM shell, русская локализация и первый вход](<I0.3 — PPM shell, русская локализация и первый вход.md>) | P0 | `accepted` | I0.2 | пользователь не видит Plane на основном пути |
 | [I0.4 — Web Canvas route и browser-safe AntyFlow core](<I0.4 — Web Canvas route и browser-safe AntyFlow core.md>) | P0 | `planned` | I0.3 | открывается `Мозг проекта` |
 | [I0.5 — Canvas persistence, версии и права](<I0.5 — Canvas persistence, версии и права.md>) | P0 | `planned` | I0.4 | общий сохраняемый Canvas project |
 | [I0.6 — Проекция Plane Work Item на Canvas](<I0.6 — Проекция Plane Work Item на Canvas.md>) | P0 | `planned` | I0.5 | одна задача в двух представлениях |
@@ -53,4 +53,4 @@ updated: 2026-09-12
 
 ## Следующее действие
 
-Проверить pull request I0.1 и при желании вручную пройти UI smoke. После решения владельца принять I0.1 либо вернуть замечания; до этого I0.2 не начинать.
+Начать I0.4: выделить browser-safe Canvas boundary, подключить совместимую версию tldraw и открыть редактируемый `Мозг проекта` без серверного persistence.

@@ -5,7 +5,7 @@ updated: 2026-09-12
 type: project
 project_home: true
 project_id: intellect-ppm
-status: planned
+status: active
 priority: high
 area: project-management
 areas:
@@ -15,7 +15,7 @@ related_domains:
 owner: "Мамин И."
 team:
   - Мамин
-next_action: "Открыть рабочую копию PPM и выполнить I0.1 — fork, pin, лицензия и чистый baseline Plane"
+next_action: "Реализовать I0.4: browser-safe Canvas core, note/group, visual arrows и permission-safe route Мозга проекта"
 tags:
   - type/project
   - domain/intellect
@@ -38,8 +38,11 @@ AntyFlow-first web-платформа для 5–20 команд проектн�
 - Git-контур связывает проект, Work Items и Canvas с внешним или self-hosted Git provider; PPM не пишет собственный Git-сервер.
 - Актуальная стабильная база интеграции — Plane `v1.4.2` под AGPL-3.0.
 - Предыдущие web-first v1 и Plane-first v2 сохранены как история и помечены `superseded`.
+- I0.3 принята владельцем 2026-09-13 и зафиксирована отдельным локальным коммитом Plane fork; push не выполнялся.
+- Для I0.3 реализованы и проверены на работающем API PPM shell, русский first path, сохранение выбора языка, reload-safe navigation, штатный Work Item flow, runtime-варианты Guest/Viewer, Member и Admin, keyboard/focus semantics.
+- Автоматические проверки I0.3 проходят: brand tests/audit, navigation tests, typecheck, lint, production PPM build и rollback Plane build.
 - **Ответственный:** Мамин И.
-- **Статус:** инициирование.
+- **Статус:** переход к реализации I0.4.
 
 ## Документация
 
@@ -53,15 +56,19 @@ AntyFlow-first web-платформа для 5–20 команд проектн�
 
 ## Следующий шаг
 
-- [ ] Открыть `C:\Users\Имиль Ермолов\Desktop\PPM` как рабочий проект Codex.
-- [ ] Выполнить [I0.1](<Документация PPM/Intelligence-first/tasks/I0.1 — Fork, pin, лицензия и чистый baseline Plane.md>).
-- [ ] После чистого baseline выполнить [I0.2](<Документация PPM/Intelligence-first/tasks/I0.2 — PPM brand foundation и token bridge.md>).
-- [ ] Не начинать Canvas, Vault, RAG и Git параллельно до прохождения их зависимостей из очереди.
+- [ ] Провести owner review I0.1 и I0.2, не меняя их на `accepted` автоматически.
+- [ ] Реализовать I0.4 в отдельной ветке поверх принятой I0.3.
+- [ ] Не добавлять server persistence и Work Item projection до I0.5/I0.6.
 
 ## Журнал изменений
 
+### 2026-09-13
+
+- Владелец принял I0.3 переходом к следующему этапу; начата подготовка отдельной ветки I0.4.
+
 ### 2026-09-12
 
+- I0.3 доведена до `review`: полный auth/project/Work Item E2E и runtime-матрица ролей пройдены на локальном API, production и rollback builds проходят.
 - Владелец расширил целевой продукт: AntyFlow-first оболочка, Project Vault, изолированный Project Brain и интегрированный Git-контур.
 - Создана каноническая Intelligence-first редакция ТЗ v3 с архитектурой, моделью данных, API, UX, безопасностью, эксплуатацией, тестированием и исполнимой очередью.
 - Plane-first v2 сохранена как историческая редакция; её карточки больше не являются исполнительной очередью.

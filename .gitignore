@@ -1,5 +1,6 @@
 # Зависимости и артефакты сборки (пересоздаются командами npm)
 node_modules/
+.pnpm-store/
 out/
 dist/
 release/
