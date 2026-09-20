@@ -4,6 +4,7 @@ import {
   compareDiagnosticMultiset,
   normalizeDiagnosticFile,
   parseTypeScriptDiagnostics,
+  sha256NormalizedText,
   type AllowedTypeScriptFingerprint,
   type TypeScriptDiagnostic
 } from './typecheckBaseline'
@@ -35,6 +36,16 @@ function diagnostic(overrides: Partial<TypeScriptDiagnostic> = {}): TypeScriptDi
 }
 
 describe('TypeScript baseline exact multiset comparator', () => {
+  it('hashes equivalent LF and CRLF config text identically', () => {
+    const lf = '{\n  "compilerOptions": { "strict": true }\n}\n'
+    const crlf = lf.replace(/\n/g, '\r\n')
+
+    expect(sha256NormalizedText(crlf)).toBe(sha256NormalizedText(lf))
+    expect(sha256NormalizedText(lf.replace('true', 'false'))).not.toBe(
+      sha256NormalizedText(lf)
+    )
+  })
+
   it('normalizes primary diagnostics and reports an added or changed diagnostic', () => {
     const output = [
       "C:\\fixture\\AntyFlow\\src\\fixture.ts(10,3): error TS18048:   'value'   is possibly 'undefined'.  ",

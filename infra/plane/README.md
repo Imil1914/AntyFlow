@@ -40,6 +40,11 @@ docker compose --env-file infra/plane/.runtime/plane.env \
   -f infra/plane/docker-compose.compat.yml up -d
 ```
 
+Во время активной разработки строгий `plane:verify` намеренно завершается ошибкой, если `plane-fork` ушёл от
+закреплённого integration commit или содержит изменения. Для проверки неизменяемого исходного baseline без
+переключения и очистки рабочей ветки используйте `npm run plane:verify:baseline`: он читает release-файлы из
+Git history, проверяет tag, SHA-256, ancestry, `origin` и `upstream`, но явно сообщает о dirty checkout.
+
 Откройте `http://127.0.0.1:8080`. Первый запуск загружает контейнеры и выполняет миграции, поэтому готовность интерфейса может занять несколько минут.
 
 Официальный Compose в release `v1.4.2` всё ещё ссылается на недоступный `minio/minio:latest` в Docker Hub. Маленький compatibility overlay не меняет код или конфигурацию Plane: он заменяет только образ этого S3-совместимого сервиса на официальный Quay registry и закрепляет последний open-source release MinIO `RELEASE.2025-09-07T16-13-09Z`. Основание: [официальная инструкция MinIO](https://min.io/docs/minio/container/index.html) и [release upstream](https://github.com/minio/minio/releases/tag/RELEASE.2025-09-07T16-13-09Z).

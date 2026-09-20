@@ -2,6 +2,13 @@
   "schema_version": 1,
   "milestone": "M0.6",
   "captured_on": "2026-08-28",
+  "maintenance": [
+    {
+      "updated_on": "2026-09-20",
+      "reason": "Normalize CRLF to LF before hashing tsconfig.json so the prerequisite is platform-independent.",
+      "previous_raw_tsconfig_sha256": "1e74c194386aa63d4fcfbc4486dda9221fe0a33898c2a72a2d9cb3c45cb15fcf"
+    }
+  ],
   "repository": {
     "head": "96aa1be31d23182021fafbf861a79560629c02ec",
     "branch": "feat/t1.1-sqlite",
@@ -27,7 +34,7 @@
   "hashes": {
     "package.json": "f06453587986c82917588fe81f1a694ab308da85926ed103a6e1c0b74270a945",
     "package-lock.json": "3a3743f8dc80d3ee65bbdae9d30ac79e6db131b528a0650023c7ecc35a2b1002",
-    "tsconfig.json": "1e74c194386aa63d4fcfbc4486dda9221fe0a33898c2a72a2d9cb3c45cb15fcf",
+    "tsconfig.json": "91c5ccdf8faa2728aa878b7b6e3b85936fd00593ce317b4c1f53f961f07133a7",
     "electron.vite.config.ts": "df9d454df71469a2579da0e6e38d65be310eec582c38906dfa3edf6fd755bcbd"
   },
   "diagnostic_source_hashes": {
@@ -245,6 +252,7 @@
     "missing_diagnostic": "manifest reduction required before acceptance",
     "typescript_version_change": "stop and review baseline",
     "tsconfig_hash_change": "stop and review baseline",
+    "tsconfig_hash_line_endings": "CRLF is normalized to LF before SHA-256",
     "new_allowance": "forbidden in ordinary implementation cards"
   }
 }

@@ -4,6 +4,10 @@
 
 Normative manifest: [`baselines/M0.6-quality-baseline.json`](./baselines/M0.6-quality-baseline.json)
 
+> Обслуживание 2026-09-20: исходный raw hash `tsconfig.json` отражал CRLF checkout
+> Windows. Guard переведён на канонический LF hash без изменения конфигурации и списка
+> разрешённых диагностик; прежнее значение сохранено в maintenance-записи manifest.
+
 ## 1. Что именно зафиксировано
 
 Этот документ задаёт контрольную точку после защитного эпика E0:
@@ -49,10 +53,13 @@ HEAD указан только как контекст. Рабочее дере�
 |---|---|
 | `package.json` | `f06453587986c82917588fe81f1a694ab308da85926ed103a6e1c0b74270a945` |
 | `package-lock.json` | `3a3743f8dc80d3ee65bbdae9d30ac79e6db131b528a0650023c7ecc35a2b1002` |
-| `tsconfig.json` | `1e74c194386aa63d4fcfbc4486dda9221fe0a33898c2a72a2d9cb3c45cb15fcf` |
+| `tsconfig.json` | `91c5ccdf8faa2728aa878b7b6e3b85936fd00593ce317b4c1f53f961f07133a7` |
 | `electron.vite.config.ts` | `df9d454df71469a2579da0e6e38d65be310eec582c38906dfa3edf6fd755bcbd` |
 
 Guard жёстко проверяет TypeScript version и `tsconfig.json` hash. Остальные hashes фиксируют контекст для ревью и обновляются только с объяснением в соответствующей карточке.
+
+Для `tsconfig.json` guard сначала нормализует окончания строк CRLF в LF. Поэтому hash
+фиксирует содержимое конфигурации, но не зависит от платформенных настроек Git checkout.
 
 ## 5. Автоматические тесты
 

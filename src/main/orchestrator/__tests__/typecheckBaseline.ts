@@ -367,8 +367,12 @@ export function readTypecheckBaselineManifest(
   }
 }
 
-export function sha256File(file: string): string {
-  return createHash('sha256').update(readFileSync(file)).digest('hex')
+export function sha256NormalizedText(value: string): string {
+  return createHash('sha256').update(value.replace(/\r\n/g, '\n'), 'utf8').digest('hex')
+}
+
+export function sha256TextFile(file: string): string {
+  return sha256NormalizedText(readFileSync(file, 'utf8'))
 }
 
 export function readLocalTypeScriptVersion(projectRoot = DEFAULT_PROJECT_ROOT): string {
@@ -395,7 +399,7 @@ export function assertBaselinePrerequisites(
     )
   }
 
-  const actualTsconfigHash = sha256File(resolve(projectRoot, 'tsconfig.json'))
+  const actualTsconfigHash = sha256TextFile(resolve(projectRoot, 'tsconfig.json'))
   const expectedTsconfigHash = manifest.hashes['tsconfig.json']
   if (actualTsconfigHash !== expectedTsconfigHash) {
     throw new Error(
