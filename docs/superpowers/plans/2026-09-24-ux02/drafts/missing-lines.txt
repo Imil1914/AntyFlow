@@ -1,0 +1,128 @@
+apps/web/app/(home)/about/brand-foundation/page.tsx:25
+   <p className="tracking-widest text-caption-md-semibold text-accent-primary uppercase">I0.2 smoke</p>
+apps/web/app/(home)/about/brand-foundation/page.tsx:26
+   <h1 className="text-3xl mt-2 font-semibold tracking-tight">PPM brand foundation</h1>
+apps/web/app/(home)/about/open-source/page.tsx:44
+   <p className="tracking-widest mb-3 text-caption-md-semibold text-accent-primary uppercase">
+apps/web/app/(home)/about/open-source/page.tsx:47
+   <h1 className="text-3xl font-semibold tracking-tight">{ppmT("about.heading")}</h1>
+apps/web/app/(home)/about/ppm-guide/page.tsx:52
+   <p className="tracking-widest text-caption-md-semibold text-accent-primary uppercase">Помощь</p>
+apps/web/app/(home)/about/ppm-guide/page.tsx:53
+   <h1 className="text-3xl mt-3 font-semibold tracking-tight">Руководство PPM</h1>
+apps/web/core/components/ppm-admin/admin-center.tsx:67
+   <p className="text-15 mt-3 font-semibold text-primary">{ppmT("admin.error")}</p>
+apps/web/core/components/ppm-admin/admin-center.tsx:145
+   <span className="font-mono rounded bg-layer-1 px-2 py-1 text-10 text-secondary">{project.identifier}</span>
+apps/web/core/components/ppm-admin/admin-center.tsx:305
+   <p className="font-mono text-12 font-semibold text-primary">{event.action}</p>
+apps/web/core/components/ppm-admin/admin-center.tsx:442
+   <div className="shadow-sm max-w-lg rounded-2xl border border-subtle bg-surface-2 p-8 text-center">
+apps/web/core/components/ppm-admin/admin-center.tsx:494
+   ? "shadow-sm bg-layer-1 text-primary"
+apps/web/core/components/ppm-git/route.tsx:493
+   className="border-accent-primary/40 inline-flex items-center gap-2 rounded-md border bg-accent-primary/5 px-3 py-2 text-12 font-semibold text-accent-primary hover:bg-accent-primary/10"
+apps/web/core/components/ppm-git/route.tsx:522
+   className="border-red-500/30 bg-red-500/10 flex items-start justify-between gap-3 rounded-lg border p-3 text-12 text-primary"
+apps/web/core/components/ppm-git/route.tsx:544
+   <div className="border-cyan-500/20 bg-cyan-500/5 flex items-start gap-3 rounded-xl border p-4">
+apps/web/core/components/ppm-git/route.tsx:579
+   <h3 className="text-15 mt-3 font-semibold text-primary">Добавьте первый репозиторий</h3>
+apps/web/core/components/ppm-git/route.tsx:661
+   <h2 id="ppm-git-guide-title" className="text-15 font-semibold text-primary">
+apps/web/core/components/ppm-git/route.tsx:765
+   confirmed: "border-green-500/20 bg-green-500/10 text-green-500",
+apps/web/core/components/ppm-git/route.tsx:766
+   waiting: "border-amber-500/20 bg-amber-500/10 text-amber-500",
+apps/web/core/components/ppm-git/route.tsx:804
+   <h2 id="ppm-git-write-title" className="text-15 font-semibold text-primary">
+apps/web/core/components/ppm-git/route.tsx:823
+   <p className="border-amber-500/20 bg-amber-500/5 mt-3 rounded-lg border p-3 text-11 leading-5 text-secondary">
+apps/web/core/components/ppm-git/route.tsx:905
+   ? "border-green-500/30 bg-green-500/10 text-green-500"
+apps/web/core/components/ppm-git/route.tsx:906
+   : "border-amber-500/30 bg-amber-500/10 text-amber-500"
+apps/web/core/components/ppm-git/route.tsx:923
+   <Check className="text-green-500 mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+apps/web/core/components/ppm-git/route.tsx:925
+   <X className="text-amber-500 mt-0.5 size-3.5 shrink-0" aria-hidden="true" />
+apps/web/core/components/ppm-git/route.tsx:943
+   <span className={connection.permission_ready ? "text-green-500" : "text-amber-500"}>
+apps/web/core/components/ppm-git/route.tsx:954
+   <div className="border-amber-500/20 bg-amber-500/5 mt-3 rounded-md border p-3">
+apps/web/core/components/ppm-git/route.tsx:1035
+   <div className="border-cyan-500/20 bg-cyan-500/5 rounded-lg border p-3 text-11 leading-5 text-secondary">
+apps/web/core/components/ppm-git/route.tsx:1038
+   {action.error && <p className="text-red-500 text-12">{action.error.message}</p>}
+apps/web/core/components/ppm-git/route.tsx:1110
+   <div className="border-accent-primary/40 mt-2 rounded-md border bg-accent-primary/5 p-2 text-12 text-primary">
+apps/web/core/components/ppm-git/route.tsx:1153
+   className="focus:border-accent-primary mt-2 min-h-36 w-full resize-y rounded-md border border-subtle bg-surface-2 px-3 py-2 text-13 text-primary outline-none"
+apps/web/core/components/ppm-git/route.tsx:1212
+   <h2 id="ppm-github-title" className="text-15 font-semibold text-primary">
+apps/web/core/components/ppm-git/route.tsx:1281
+   <p className="text-red-500 mt-1 text-11">{connection.last_error.message}</p>
+apps/web/core/components/ppm-git/route.tsx:1296
+   className="hover:bg-red-500/10 hover:text-red-500 rounded-md px-2.5 py-1.5 text-11 text-secondary"
+apps/web/core/components/ppm-git/route.tsx:1397
+   <span className="bg-amber-500/10 text-amber-500 inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-10 font-semibold">
+apps/web/core/components/ppm-git/route.tsx:1450
+   ? "bg-green-500"
+apps/web/core/components/ppm-git/route.tsx:1452
+   ? "bg-red-500"
+apps/web/core/components/ppm-git/route.tsx:1454
+   ? "bg-amber-500"
+apps/web/core/components/ppm-git/route.tsx:1455
+   : "bg-secondary"
+apps/web/core/components/ppm-git/route.tsx:1470
+   {snapshot.error?.message && <p className="text-red-500">{snapshot.error.message}</p>}
+apps/web/core/components/ppm-git/route.tsx:1487
+   className="hover:bg-red-500/10 hover:text-red-500 rounded-md px-2.5 py-1.5 text-10 text-secondary disabled:opacity-50"
+apps/web/core/components/ppm-git/route.tsx:1531
+   className="hover:bg-red-500/10 hover:text-red-500 ml-auto inline-flex items-center gap-1.5 rounded-md px-2.5 py-1.5 text-11 text-secondary"
+apps/web/core/components/ppm-git/route.tsx:1571
+   {copied ? <Check className="text-green-500 size-3.5" /> : <Clipboard className="size-3.5" />}
+apps/web/core/components/ppm-git/route.tsx:1673
+   className="hover:bg-red-500/10 hover:text-red-500 grid size-8 place-items-center rounded-md text-secondary"
+apps/web/core/components/ppm-git/route.tsx:1849
+   <div className="border-accent-primary/40 mt-2 rounded-md border bg-accent-primary/5 p-2 text-12 text-primary">
+apps/web/core/components/ppm-git/route.tsx:1919
+   className="shadow-2xl max-h-[90vh] w-full max-w-xl overflow-y-auto rounded-xl border border-subtle bg-surface-1 p-5"
+apps/web/core/components/ppm-git/route.tsx:1984
+   className="focus:border-accent-primary mt-2 w-full rounded-md border border-subtle bg-surface-2 px-3 py-2 text-13 text-primary outline-none"
+apps/web/core/components/ppm-shell/project-feature-page.tsx:115
+   className="focus-visible:outline-accent-primary mt-4 inline-flex items-center gap-2 rounded-md bg-accent-primary px-3 py-2 text-13 font-semibold text-on-color hover:bg-accent-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2"
+apps/web/core/components/ppm-shell/project-feature-page.tsx:144
+   className="focus-visible:outline-accent-primary inline-flex items-center gap-2 rounded-md bg-accent-primary px-3 py-2 text-13 font-semibold text-on-color hover:bg-accent-primary-hover focus-visible:outline-2 focus-visible:outline-offset-2"
+apps/web/core/components/ppm-shell/project-feature-page.tsx:151
+   className="focus-visible:outline-accent-primary inline-flex items-center rounded-md border border-subtle bg-surface-1 px-3 py-2 text-13 font-semibold text-primary hover:bg-layer-1 focus-visible:outline-2 focus-visible:outline-offset-2"
+apps/web/core/components/ppm-shell/project-feature-page.tsx:206
+   className="group focus-visible:outline-accent-primary flex min-h-44 flex-col rounded-xl border border-subtle bg-surface-2 p-4 transition-colors hover:border-strong hover:bg-layer-1 focus-visible:outline-2 focus-visible:outline-offset-2"
+apps/web/core/components/ppm-vault/route.tsx:425
+   ? "border-red-500/30 bg-red-500/10 text-red-300"
+apps/web/core/components/ppm-vault/route.tsx:426
+   : "border-green-500/30 bg-green-500/10 text-green-300"
+apps/web/core/components/ppm-vault/route.tsx:520
+   className="border-red-500/30 text-red-300 hover:bg-red-500/10 inline-flex items-center gap-1.5 rounded-md border px-3 py-2 text-12 font-semibold"
+apps/web/core/components/ppm-vault/route.tsx:668
+   className="font-mono focus:border-accent-primary min-h-[420px] w-full resize-y rounded-lg border border-subtle bg-surface-2 p-4 text-13 leading-6 text-primary outline-none"
+apps/web/core/components/ppm-vault/route.tsx:804
+   <span className="text-amber-300 mt-0.5 block text-10">
+apps/web/core/components/ppm-vault/route.tsx:930
+   className="hover:border-accent-primary rounded-lg border border-subtle bg-surface-2 p-4 text-left hover:bg-layer-1"
+apps/web/core/components/ppm-vault/route.tsx:951
+   <span className={edge.status === "resolved" ? "text-primary" : "text-amber-300"}>
+apps/web/core/components/ppm-vault/route.tsx:955
+   <p className="text-amber-300 mt-1 text-10">
+apps/web/core/components/ppm-vault/route.tsx:1062
+   className="shadow-2xl w-full max-w-md rounded-xl border border-subtle bg-surface-1 p-5"
+apps/web/core/components/ppm-vault/route.tsx:1083
+   className="focus:border-accent-primary mt-2 w-full rounded-md border border-subtle bg-surface-2 px-3 py-2 text-13 text-primary outline-none"
+apps/web/core/components/ppm-vault/route.tsx:1105
+   className="focus:border-accent-primary mt-2 w-full rounded-md border border-subtle bg-surface-2 px-3 py-2 text-13 text-primary outline-none"
+apps/web/core/components/ppm-vault/route.tsx:1116
+   className="focus:border-accent-primary mt-2 w-full rounded-md border border-subtle bg-surface-2 px-3 py-2 text-13 text-primary outline-none"
+apps/web/core/components/workspace/sidebar/project-navigation.tsx:132
+   className="focus-visible:outline-accent-primary block rounded-md focus-visible:outline-2 focus-visible:outline-offset-2"
+apps/web/core/layouts/auth-layout/project-wrapper.tsx:172
+   <div className="border-accent-primary/30 flex flex-wrap items-center justify-between gap-2 border-b bg-accent-primary/10 px-4 py-2 text-12 text-primary">

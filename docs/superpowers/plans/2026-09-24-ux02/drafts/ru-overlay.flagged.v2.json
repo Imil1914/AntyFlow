@@ -1,0 +1,922 @@
+[
+  {
+    "key": "common:views",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления",
+    "to": "Представления"
+  },
+  {
+    "key": "common:modules",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули",
+    "to": "Модули"
+  },
+  {
+    "key": "common:view_link_copied_to_clipboard",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Ссылка на представление скопирована в буфер",
+    "to": "Ссылка на представление скопирована в буфер"
+  },
+  {
+    "key": "common:common.module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модуль",
+    "to": "Модуль"
+  },
+  {
+    "key": "common:common.modules",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули",
+    "to": "Модули"
+  },
+  {
+    "key": "common:common.views",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления",
+    "to": "Представления"
+  },
+  {
+    "key": "common:view.label",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "{count, plural, one {Представление} other {Представления}}",
+    "to": "{count, plural, one {Представление} other {Представления}}"
+  },
+  {
+    "key": "common:view.create.label",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Создать представление",
+    "to": "Создать представление"
+  },
+  {
+    "key": "common:view.update.label",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Обновить представление",
+    "to": "Обновить представление"
+  },
+  {
+    "key": "common:role_details.member.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Чтение, создание, редактирование и удаление элементов внутри проектов, циклов и модулей",
+    "to": "Чтение, создание, редактирование и удаление элементов внутри проектов, спринтов и модулей"
+  },
+  {
+    "key": "empty-state:project_empty_state.modules.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Сопоставьте цели проекта с Модулями и легко отслеживайте.",
+    "to": "Сопоставьте цели проекта с Модулями и легко отслеживайте."
+  },
+  {
+    "key": "empty-state:project_empty_state.modules.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули состоят из взаимосвязанных рабочих элементов. Они помогают отслеживать прогресс через фазы проекта, каждая из которых имеет конкретные сроки и аналитику, указывающую, насколько близко вы к достижению этих фаз.",
+    "to": "Модули состоят из взаимосвязанных задач. Они помогают отслеживать прогресс через фазы проекта, каждая из которых имеет конкретные сроки и аналитику, указывающую, насколько близко вы к достижению этих фаз."
+  },
+  {
+    "key": "empty-state:project_empty_state.modules.cta_primary",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Установите свой первый модуль",
+    "to": "Установите свой первый модуль"
+  },
+  {
+    "key": "empty-state:project_empty_state.module_work_items.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Нет рабочих элементов для отображения в этом Модуле",
+    "to": "Нет задач для отображения в этом Модуле"
+  },
+  {
+    "key": "empty-state:project_empty_state.module_work_items.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Создайте рабочие элементы, чтобы начать отслеживать этот модуль.",
+    "to": "Создайте задачи, чтобы начать отслеживать этот модуль."
+  },
+  {
+    "key": "empty-state:project_empty_state.views.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Сохраните пользовательские представления для вашего проекта",
+    "to": "Сохраните пользовательские представления для вашего проекта"
+  },
+  {
+    "key": "empty-state:project_empty_state.views.description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления — это сохраненные фильтры, которые помогают вам быстро получить доступ к информации, которую вы используете чаще всего. Сотрудничайте легко, когда товарищи по команде делятся и адаптируют представления к своим конкретным потребностям.",
+    "to": "Представления — это сохраненные фильтры, которые помогают вам быстро получить доступ к информации, которую вы используете чаще всего. Сотрудничайте легко, когда товарищи по команде делятся и адаптируют представления к своим конкретным потребностям."
+  },
+  {
+    "key": "empty-state:project_empty_state.views.cta_primary",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Создать представление",
+    "to": "Создать представление"
+  },
+  {
+    "key": "empty-state:project_empty_state.no_work_items_in_project.description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Добавьте рабочие элементы в свой проект и разделите работу на отслеживаемые части с помощью представлений.",
+    "to": "Добавьте задачи в свой проект и разделите работу на отслеживаемые части с помощью представлений."
+  },
+  {
+    "key": "empty-state:workspace_empty_state.archive_modules.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Пока нет архивированных Модулей",
+    "to": "Пока нет архивированных Модулей"
+  },
+  {
+    "key": "empty-state:workspace_empty_state.archive_modules.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Чтобы привести в порядок ваш проект, архивируйте завершенные или отмененные модули. Найдите их здесь после архивирования.",
+    "to": "Чтобы привести в порядок ваш проект, архивируйте завершенные или отмененные модули. Найдите их здесь после архивирования."
+  },
+  {
+    "key": "empty-state:workspace_empty_state.your_work_by_priority.title",
+    "flags": [
+      "SG_CASE_GUESS"
+    ],
+    "from": "Пока не назначен рабочий элемент",
+    "to": "Пока не назначен задача"
+  },
+  {
+    "key": "empty-state:workspace_empty_state.your_work_by_state.title",
+    "flags": [
+      "SG_CASE_GUESS"
+    ],
+    "from": "Пока не назначен рабочий элемент",
+    "to": "Пока не назначен задача"
+  },
+  {
+    "key": "empty-state:workspace_empty_state.views.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Пока нет Представлений",
+    "to": "Пока нет Представлений"
+  },
+  {
+    "key": "empty-state:workspace_empty_state.views.description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Добавьте рабочие элементы в свой проект и используйте представления для фильтрации, сортировки и отслеживания прогресса без усилий.",
+    "to": "Добавьте задачи в свой проект и используйте представления для фильтрации, сортировки и отслеживания прогресса без усилий."
+  },
+  {
+    "key": "empty-state:workspace_empty_state.analytics_no_module.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Создайте модули для организации работы и отслеживания прогресса на разных этапах.",
+    "to": "Создайте модули для организации работы и отслеживания прогресса на разных этапах."
+  },
+  {
+    "key": "empty-state:settings_empty_state.workflows.states.description",
+    "flags": [
+      "SG_CASE_GUESS"
+    ],
+    "from": "Выберите состояния, через которые проходит рабочий элемент.",
+    "to": "Выберите состояния, через которые проходит задача."
+  },
+  {
+    "key": "module:module.label",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "{count, plural, one {Модуль} other {Модули}}",
+    "to": "{count, plural, one {Модуль} other {Модули}}"
+  },
+  {
+    "key": "module:module.no_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Нет модуля",
+    "to": "Нет модуля"
+  },
+  {
+    "key": "module:module.select",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Добавить модули",
+    "to": "Добавить модули"
+  },
+  {
+    "key": "navigation:sidebar.views",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления",
+    "to": "Представления"
+  },
+  {
+    "key": "navigation:sidebar.modules",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули",
+    "to": "Модули"
+  },
+  {
+    "key": "power-k:power_k.contextual_actions.work_item.add_to_modules",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Добавить в модули",
+    "to": "Добавить в модули"
+  },
+  {
+    "key": "power-k:power_k.contextual_actions.module.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Действия с модулем",
+    "to": "Действия с модулем"
+  },
+  {
+    "key": "power-k:power_k.contextual_actions.module.indicator",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модуль",
+    "to": "Модуль"
+  },
+  {
+    "key": "power-k:power_k.contextual_actions.module.copy_url_toast_success",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "URL модуля скопирован в буфер обмена.",
+    "to": "URL модуля скопирован в буфер обмена."
+  },
+  {
+    "key": "power-k:power_k.contextual_actions.module.copy_url_toast_error",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Произошла ошибка при копировании URL модуля в буфер обмена.",
+    "to": "Произошла ошибка при копировании URL модуля в буфер обмена."
+  },
+  {
+    "key": "power-k:power_k.creation_actions.create_view",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Новое представление",
+    "to": "Новое представление"
+  },
+  {
+    "key": "power-k:power_k.creation_actions.create_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Новый модуль",
+    "to": "Новый модуль"
+  },
+  {
+    "key": "power-k:power_k.navigation_actions.open_project_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Открыть модуль",
+    "to": "Открыть модуль"
+  },
+  {
+    "key": "power-k:power_k.navigation_actions.nav_project_modules",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Перейти к модулям",
+    "to": "Перейти к модулям"
+  },
+  {
+    "key": "power-k:power_k.navigation_actions.open_project_view",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Открыть представление проекта",
+    "to": "Открыть представление проекта"
+  },
+  {
+    "key": "power-k:power_k.navigation_actions.nav_project_views",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Перейти к представлениям проекта",
+    "to": "Перейти к представлениям проекта"
+  },
+  {
+    "key": "power-k:power_k.page_placeholders.open_project_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Открыть модуль",
+    "to": "Открыть модуль"
+  },
+  {
+    "key": "power-k:power_k.page_placeholders.open_project_view",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Открыть представление проекта",
+    "to": "Открыть представление проекта"
+  },
+  {
+    "key": "power-k:power_k.page_placeholders.update_work_item_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Добавить в модули",
+    "to": "Добавить в модули"
+  },
+  {
+    "key": "project-settings:project_settings.features.modules.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули",
+    "to": "Модули"
+  },
+  {
+    "key": "project-settings:project_settings.features.modules.short_title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули",
+    "to": "Модули"
+  },
+  {
+    "key": "project-settings:project_settings.features.modules.toggle_title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Включить модули",
+    "to": "Включить модули"
+  },
+  {
+    "key": "project-settings:project_settings.features.modules.toggle_description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Участники проекта смогут создавать и редактировать модули.",
+    "to": "Участники проекта смогут создавать и редактировать модули."
+  },
+  {
+    "key": "project-settings:project_settings.features.views.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления",
+    "to": "Представления"
+  },
+  {
+    "key": "project-settings:project_settings.features.views.short_title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления",
+    "to": "Представления"
+  },
+  {
+    "key": "project-settings:project_settings.features.views.toggle_title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Включить представления",
+    "to": "Включить представления"
+  },
+  {
+    "key": "project-settings:project_settings.features.views.toggle_description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Участники проекта смогут создавать и редактировать представления.",
+    "to": "Участники проекта смогут создавать и редактировать представления."
+  },
+  {
+    "key": "project:project_views.empty_state.general.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Сохраняйте фильтры в виде представлений. Создавайте неограниченное количество вариантов",
+    "to": "Сохраняйте фильтры в виде представлений. Создавайте неограниченное количество вариантов"
+  },
+  {
+    "key": "project:project_views.empty_state.general.description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления - это сохранённые наборы фильтров для быстрого доступа. Все участники проекта видят созданные представления и могут выбирать подходящие.",
+    "to": "Представления - это сохранённые наборы фильтров для быстрого доступа. Все участники проекта видят созданные представления и могут выбирать подходящие."
+  },
+  {
+    "key": "project:project_views.empty_state.general.primary_button.text",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Создать первое представление",
+    "to": "Создать первое представление"
+  },
+  {
+    "key": "project:project_views.empty_state.general.primary_button.comic.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления работают на основе свойств рабочих элементов",
+    "to": "Представления работают на основе свойств задач"
+  },
+  {
+    "key": "project:project_views.empty_state.general.primary_button.comic.description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Создавайте представления с любым количеством свойств в качестве фильтров.",
+    "to": "Создавайте представления с любым количеством свойств в качестве фильтров."
+  },
+  {
+    "key": "project:project_views.empty_state.general.filter.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Подходящих представлений не найдено",
+    "to": "Подходящих представлений не найдено"
+  },
+  {
+    "key": "project:project_views.empty_state.general.filter.description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Нет представлений, соответствующих критериям поиска.\n Создайте новое представление.",
+    "to": "Нет представлений, соответствующих критериям поиска.\n Создайте новое представление."
+  },
+  {
+    "key": "project:project_views.delete_view.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Вы уверены, что хотите удалить это представление?",
+    "to": "Вы уверены, что хотите удалить это представление?"
+  },
+  {
+    "key": "project:project_views.delete_view.content",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "При подтверждении все параметры сортировки, фильтрации и отображения + макет, выбранный для этого представления, будут безвозвратно удалены без возможности восстановления.",
+    "to": "При подтверждении все параметры сортировки, фильтрации и отображения + макет, выбранный для этого представления, будут безвозвратно удалены без возможности восстановления."
+  },
+  {
+    "key": "project:project_module.add_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Добавить модуль",
+    "to": "Добавить модуль"
+  },
+  {
+    "key": "project:project_module.update_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Обновить модуль",
+    "to": "Обновить модуль"
+  },
+  {
+    "key": "project:project_module.create_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Создать модуль",
+    "to": "Создать модуль"
+  },
+  {
+    "key": "project:project_module.archive_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Архивировать модуль",
+    "to": "Архивировать модуль"
+  },
+  {
+    "key": "project:project_module.restore_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Восстановить модуль",
+    "to": "Восстановить модуль"
+  },
+  {
+    "key": "project:project_module.delete_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Удалить модуль",
+    "to": "Удалить модуль"
+  },
+  {
+    "key": "project:project_module.empty_state.general.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Связывайте этапы проекта с модулями для удобного отслеживания рабочих элементов.",
+    "to": "Связывайте этапы проекта с модулями для удобного отслеживания задач."
+  },
+  {
+    "key": "project:project_module.empty_state.general.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модуль объединяет рабочие элементы по логическому или иерархическому признаку. Используйте модули для контроля этапов проекта. Каждый модуль имеет собственные сроки выполнения и аналитику для отслеживания прогресса.",
+    "to": "Модуль объединяет задачи по логическому или иерархическому признаку. Используйте модули для контроля этапов проекта. Каждый модуль имеет собственные сроки выполнения и аналитику для отслеживания прогресса."
+  },
+  {
+    "key": "project:project_module.empty_state.general.primary_button.text",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Создать первый модуль",
+    "to": "Создать первый модуль"
+  },
+  {
+    "key": "project:project_module.empty_state.general.primary_button.comic.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули группируют рабочие элементы по иерархии",
+    "to": "Модули группируют задачи по иерархии"
+  },
+  {
+    "key": "project:project_module.empty_state.general.primary_button.comic.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Примеры группировки: модуль корзины, модуль шасси или модуль склада.",
+    "to": "Примеры группировки: модуль корзины, модуль шасси или модуль склада."
+  },
+  {
+    "key": "project:project_module.empty_state.no_issues.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Нет рабочих элементов в модуле",
+    "to": "Нет задач в модуле"
+  },
+  {
+    "key": "project:project_module.empty_state.no_issues.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Создавайте или добавляйте рабочие элементы, которые хотите выполнить в рамках этого модуля",
+    "to": "Создавайте или добавляйте задачи, которые хотите выполнить в рамках этого модуля"
+  },
+  {
+    "key": "project:project_module.empty_state.archived.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Нет архивных модулей",
+    "to": "Нет архивных модулей"
+  },
+  {
+    "key": "project:project_module.empty_state.archived.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Архивируйте завершённые или отменённые модули для упорядочивания проекта. Они появятся здесь после архивации.",
+    "to": "Архивируйте завершённые или отменённые модули для упорядочивания проекта. Они появятся здесь после архивации."
+  },
+  {
+    "key": "project:project_module.empty_state.sidebar.in_active",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Этот модуль ещё не активен.",
+    "to": "Этот модуль ещё не активен."
+  },
+  {
+    "key": "project:project_module.quick_actions.archive_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Архивировать модуль",
+    "to": "Архивировать модуль"
+  },
+  {
+    "key": "project:project_module.quick_actions.archive_module_description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Только завершённые или отменённые\nмодули можно архивировать.",
+    "to": "Только завершённые или отменённые\nмодули можно архивировать."
+  },
+  {
+    "key": "project:project_module.quick_actions.delete_module",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Удалить модуль",
+    "to": "Удалить модуль"
+  },
+  {
+    "key": "project:project_module.toast.copy.success",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Ссылка на модуль скопирована в буфер обмена",
+    "to": "Ссылка на модуль скопирована в буфер обмена"
+  },
+  {
+    "key": "project:project_module.toast.delete.success",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модуль успешно удалён",
+    "to": "Модуль успешно удалён"
+  },
+  {
+    "key": "project:project_module.toast.delete.error",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Ошибка удаления модуля",
+    "to": "Ошибка удаления модуля"
+  },
+  {
+    "key": "project:disabled_project.empty_state.module.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули отключены для проекта",
+    "to": "Модули отключены для проекта"
+  },
+  {
+    "key": "project:disabled_project.empty_state.module.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули - основные компоненты вашего проекта. Включите их в настройках проекта.",
+    "to": "Модули - основные компоненты вашего проекта. Включите их в настройках проекта."
+  },
+  {
+    "key": "project:disabled_project.empty_state.view.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления отключены для проекта",
+    "to": "Представления отключены для проекта"
+  },
+  {
+    "key": "project:disabled_project.empty_state.view.description",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Представления - основные компоненты вашего проекта. Включите их в настройках проекта.",
+    "to": "Представления - основные компоненты вашего проекта. Включите их в настройках проекта."
+  },
+  {
+    "key": "template:templates.empty_state.no_modules.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модулей пока нет. Организуйте работу в подпроекты с назначенными руководителями и исполнителями.",
+    "to": "Модулей пока нет. Организуйте работу в подпроекты с назначенными руководителями и исполнителями."
+  },
+  {
+    "key": "tour:product_tour.module.step_zero.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Разделите свой проект на Модули",
+    "to": "Разделите свой проект на Модули"
+  },
+  {
+    "key": "tour:product_tour.module.step_zero.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули—это меньшие, сфокусированные проекты, которые помогают пользователям группировать и организовывать рабочие задачи в определенные временные рамки.",
+    "to": "Модули—это меньшие, сфокусированные проекты, которые помогают пользователям группировать и организовывать задачи в определенные временные рамки."
+  },
+  {
+    "key": "tour:product_tour.module.step_one.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Создать Модуль",
+    "to": "Создать Модуль"
+  },
+  {
+    "key": "tour:product_tour.module.step_one.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули—это меньшие, сфокусированные проекты, которые помогают пользователям группировать и организовывать рабочие задачи в определенные временные рамки.",
+    "to": "Модули—это меньшие, сфокусированные проекты, которые помогают пользователям группировать и организовывать задачи в определенные временные рамки."
+  },
+  {
+    "key": "tour:product_tour.module.step_two.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Начните с нажатия кнопки \"+\". Добавьте новые или существующие рабочие задачи прямо со страницы Модуля.",
+    "to": "Начните с нажатия кнопки \"+\". Добавьте новые или существующие задачи прямо со страницы Модуля."
+  },
+  {
+    "key": "tour:product_tour.module.step_three.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Состояния модуля",
+    "to": "Состояния модуля"
+  },
+  {
+    "key": "tour:product_tour.module.step_three.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Модули используют эти статусы, чтобы помочь пользователям планировать и четко отслеживать прогресс и этап.",
+    "to": "Модули используют эти статусы, чтобы помочь пользователям планировать и четко отслеживать прогресс и этап."
+  },
+  {
+    "key": "tour:product_tour.module.step_four.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Прогресс модуля",
+    "to": "Прогресс модуля"
+  },
+  {
+    "key": "tour:product_tour.module.step_four.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Прогресс модуля отслеживается через завершенные элементы, с аналитикой для мониторинга производительности.",
+    "to": "Прогресс модуля отслеживается через завершенные элементы, с аналитикой для мониторинга производительности."
+  },
+  {
+    "key": "work-item-type:work_item_types.settings.properties.tooltip",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Каждый тип рабочего элемента имеет набор свойств по умолчанию, таких как Заголовок, Описание, Ответственный, Состояние, Приоритет, Дата начала, Дата окончания, Модуль, Цикл и т.д. Вы также можете настроить и добавить свои собственные свойства, чтобы адаптировать их к потребностям вашей команды.",
+    "to": "Каждый тип задачи имеет набор свойств по умолчанию, таких как Заголовок, Описание, Ответственный, Состояние, Приоритет, Дата начала, Дата окончания, Модуль, Спринт и т.д. Вы также можете настроить и добавить свои собственные свойства, чтобы адаптировать их к потребностям вашей команды."
+  },
+  {
+    "key": "work-item:issue.add.press_enter",
+    "flags": [
+      "SG_CASE_GUESS"
+    ],
+    "from": "Нажмите 'Enter' чтобы добавить ещё рабочий элемент",
+    "to": "Нажмите 'Enter' чтобы добавить ещё задача"
+  },
+  {
+    "key": "work-item:issue.remove.module.loading",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Удаление рабочего элемента из модуля",
+    "to": "Удаление задачи из модуля"
+  },
+  {
+    "key": "work-item:issue.remove.module.success",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Рабочий элемент успешно удален из модуля.",
+    "to": "Задача успешно удалена из модуля."
+  },
+  {
+    "key": "work-item:issue.remove.module.failed",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Не удалось удалить рабочий элемент из модуля. Попробуйте снова.",
+    "to": "Не удалось удалить задачу из модуля. Попробуйте снова."
+  },
+  {
+    "key": "work-item:issue.empty_state.issue_detail.description",
+    "flags": [
+      "SG_CASE_GUESS"
+    ],
+    "from": "Данный рабочий элемент был удален, архивирован или не существует.",
+    "to": "Данный задача был удален, архивирован или не существует."
+  },
+  {
+    "key": "work-item:issue.select.error",
+    "flags": [
+      "SG_CASE_GUESS"
+    ],
+    "from": "Выберите хотя бы один рабочий элемент",
+    "to": "Выберите хотя бы одна задача"
+  },
+  {
+    "key": "workspace:workspace_analytics.total_modules",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Всего модулей",
+    "to": "Всего модулей"
+  },
+  {
+    "key": "workspace:workspace_analytics.empty_state.general.primary_button.comic.title",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Аналитика работает лучше всего с Циклами + Модулями",
+    "to": "Аналитика работает лучше всего с Спринтами + Модулями"
+  },
+  {
+    "key": "workspace:workspace_analytics.empty_state.general.primary_button.comic.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Сначала ограничьте по времени ваши задачи в Циклах и, если можете, сгруппируйте задачи, которые длятся больше одного цикла, в Модули. Проверьте оба в левой навигации.",
+    "to": "Сначала ограничьте по времени ваши задачи в Спринтах и, если можете, сгруппируйте задачи, которые длятся больше одного спринта, в Модули. Проверьте оба в левой навигации."
+  },
+  {
+    "key": "workspace:workspace_analytics.empty_state.module_progress.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Аналитика прогресса модуля появится здесь. Добавьте рабочие элементы в модули, чтобы начать отслеживание прогресса.",
+    "to": "Аналитика прогресса модуля появится здесь. Добавьте задачи в модули, чтобы начать отслеживание прогресса."
+  },
+  {
+    "key": "workspace:workspace_projects.error.module_delete",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Ошибка удаления модуля",
+    "to": "Ошибка удаления модуля"
+  },
+  {
+    "key": "workspace:workspace_projects.empty_state.general.description",
+    "flags": [
+      "MODULE_MANUAL"
+    ],
+    "from": "Проекты помогают организовать работу. Создавайте проекты для управления рабочими элементами, циклами и модулями. Фильтруйте архивные проекты при необходимости.",
+    "to": "Проекты помогают организовать работу. Создавайте проекты для управления задачами, спринтами и модулями. Фильтруйте архивные проекты при необходимости."
+  },
+  {
+    "key": "workspace:workspace_views.add_view",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Добавить представление",
+    "to": "Добавить представление"
+  },
+  {
+    "key": "workspace:workspace_views.delete_view.title",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "Вы уверены, что хотите удалить это представление?",
+    "to": "Вы уверены, что хотите удалить это представление?"
+  },
+  {
+    "key": "workspace:workspace_views.delete_view.content",
+    "flags": [
+      "VIEW_MANUAL"
+    ],
+    "from": "При подтверждении все параметры сортировки, фильтрации и отображения + макет, выбранный для этого представления, будут безвозвратно удалены без возможности восстановления.",
+    "to": "При подтверждении все параметры сортировки, фильтрации и отображения + макет, выбранный для этого представления, будут безвозвратно удалены без возможности восстановления."
+  }
+]

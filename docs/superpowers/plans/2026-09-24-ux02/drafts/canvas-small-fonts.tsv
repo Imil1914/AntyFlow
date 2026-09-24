@@ -1,0 +1,88 @@
+219	8.8px	0.55rem	.ppm-canvas-presence__avatars > span
+393	10.24px	0.64rem	.ppm-brain-panel__report-launcher span
+413	10.88px	0.68rem	.ppm-brain-panel__report-launcher button, .ppm-brain-panel__report > header button
+456	10.24px	0.64rem	.ppm-brain-panel__decomposer-launcher header span:not(.ppm-brain-panel__report-icon)
+516	10.88px	0.68rem	.ppm-brain-panel__decomposer-launcher button, .ppm-brain-panel__decomposition > header button, .ppm-brain-panel__decomposition > footer button
+567	10.88px	0.68rem	.ppm-brain-panel__scope label
+590	10.56px	0.66rem	.ppm-brain-panel__scope select, .ppm-brain-panel__answer-actions select
+752	10.24px	0.64rem	.ppm-brain-panel__agent-progress span
+780	10.24px	0.64rem	.ppm-brain-panel__agent-run-controls span
+795	10.88px	0.68rem	.ppm-brain-panel__agent-run-controls button
+840	10.24px	0.64rem	.ppm-brain-panel__agent-run-save span
+855	10.88px	0.68rem	.ppm-brain-panel__agent-run-save button
+901	10.88px	0.68rem	.ppm-brain-panel__section-title span
+942	10.4px	0.65rem	.ppm-brain-panel__sources article small, .ppm-brain-panel__results small
+953	9.92px	0.62rem	.ppm-brain-panel__source-kind, .ppm-brain-panel__source-state, .ppm-brain-panel__results article > div > span
+975	10.56px	0.66rem	.ppm-brain-panel__source-limit
+1034	10.88px	0.68rem	.ppm-brain-panel__results article footer a
+1094	10.56px	0.66rem	.ppm-brain-panel__decomposition > header span
+1117	10.24px	0.64rem	.ppm-brain-panel__decomposition > header small
+1136	10.88px	0.68rem	.ppm-brain-panel__decomposition-warning
+1183	10.88px	0.68rem	.ppm-brain-panel__decomposition-items article > span
+1195	9.6px	0.6rem	.ppm-brain-panel__decomposition-items article small
+1227	10.72px	0.67rem	.ppm-brain-panel__decomposition-items p, .ppm-brain-panel__decomposition-items li
+1238	9.92px	0.62rem	.ppm-brain-panel__decomposition-items h4
+1267	10.4px	0.65rem	.ppm-brain-panel__batch-choice button
+1307	10.4px	0.65rem	.ppm-brain-panel__batch-review span
+1324	10.24px	0.64rem	.ppm-brain-panel__batch-review button
+1365	10.4px	0.65rem	.ppm-brain-panel__apply-actions span, .ppm-brain-panel__apply-actions small
+1377	10.56px	0.66rem	.ppm-brain-panel__apply-actions button
+1399	10.4px	0.65rem	.ppm-brain-panel__created-items a
+1427	10.56px	0.66rem	.ppm-brain-panel__knowledge-draft > header
+1474	9.6px	0.6rem	.ppm-brain-panel__relationship-draft > div span
+1497	10.72px	0.67rem	.ppm-brain-panel__relationship-draft > p
+1567	10.24px	0.64rem	.ppm-brain-panel__report > header small
+1600	9.92px	0.62rem	.ppm-brain-panel__report-metrics span
+1666	10.24px	0.64rem	.ppm-brain-panel__report-highlights a strong
+1682	9.6px	0.6rem	.ppm-brain-panel__report-highlights a > small
+1759	10.4px	0.65rem	.ppm-brain-panel__answer > header small
+1780	10.88px	0.68rem	.ppm-brain-panel__answer-warning
+1819	10.4px	0.65rem	.ppm-brain-panel__citations a > span
+1840	10.08px	0.63rem	.ppm-brain-panel__citations a small
+1885	10.24px	0.64rem	.ppm-brain-panel__memory article > header span, .ppm-brain-panel__memory article > header small, .ppm-brain-panel__memory article > footer
+1924	10.24px	0.64rem	.ppm-brain-panel__memory article button
+1935	10px	0.625rem	.ppm-canvas-command-trigger kbd, .ppm-canvas-rail-button kbd
+2004	9px	0.5625rem	.ppm-canvas-rail__label
+2127	10px	0.625rem	.ppm-canvas-workspace__status
+2280	9px	0.5625rem	.ppm-canvas-board-panel__list > small
+2342	10px	0.625rem	.ppm-canvas-board-row__open small
+2464	9px	0.5625rem	.ppm-canvas-command-palette > label kbd
+2855	10.72px	0.67rem	.ppm-file-drop-dialog__choices span
+3275	9.6px	0.6rem	.ppm-canvas-node__chrome > span
+3321	10px	0.625rem	.ppm-canvas-node__kind
+3369	9.44px	0.59rem	.ppm-agent-node__citations > span, .ppm-orchestrator-node__actions > span
+3385	10.08px	0.63rem	.ppm-agent-node__citations a
+3415	8.96px	0.56rem	.ppm-agent-node__meta span
+3453	10.24px	0.64rem	.ppm-orchestrator-node__actions strong
+3458	8.96px	0.56rem	.ppm-orchestrator-node__actions small
+3468	8.96px	0.56rem	.ppm-orchestrator-node__actions > div > span, .ppm-orchestrator-node__actions > div > a
+3487	9.44px	0.59rem	.ppm-orchestrator-node__trace > span
+3499	8.96px	0.56rem	.ppm-orchestrator-node__trace > div
+3533	9.6px	0.6rem	.ppm-orchestrator-node__expand, .ppm-orchestrator-node__result
+3566	8.96px	0.56rem	.ppm-agent-node--orchcall time
+3630	9.92px	0.62rem	.ppm-canvas-media > header small, .ppm-canvas-deck > header small
+3679	10.4px	0.65rem	.ppm-canvas-media > footer a, .ppm-canvas-media > footer button, .ppm-canvas-deck > footer button
+3715	9.92px	0.62rem	.ppm-canvas-diagram > p
+3783	10.88px	0.68rem	.ppm-canvas-checklist button, .ppm-canvas-table__actions button, .ppm-canvas-board-link
+3824	10.4px	0.65rem	.ppm-canvas-code__language
+3843	9.92px	0.62rem	.ppm-canvas-code__notice
+4040	10.88px	0.68rem	.ppm-semantic-edges > header span, .ppm-semantic-edges small, .ppm-semantic-edges p
+4101	10.88px	0.68rem	.ppm-semantic-edges__pair button, .ppm-semantic-edges__create > button
+4205	9px	0.5625rem	.ppm-work-item-card__source
+4227	9px	0.5625rem	.ppm-work-item-card__fields label > span
+4241	10px	0.625rem	.ppm-work-item-card__fields select, .ppm-work-item-card__fields input
+4287	10px	0.625rem	.ppm-work-item-card > footer a, .ppm-work-item-card > footer button, .ppm-work-item-card--loading button
+4308	10px	0.625rem	.ppm-work-item-card--loading > span:not(.ppm-canvas-node__kind)
+4350	8.8px	0.55rem	.ppm-work-items-view__identity > span
+4373	9.28px	0.58rem	.ppm-work-items-view__summary
+4401	8.8px	0.55rem	.ppm-work-items-view__actions button
+4444	9.92px	0.62rem	.ppm-work-items-view__filters > input, .ppm-work-items-view__filters > select, .ppm-work-items-view__create > input
+4462	9.28px	0.58rem	.ppm-work-items-view__filters > label
+4492	9.92px	0.62rem	.ppm-work-items-view__create > button, .ppm-work-items-view__column-create, .ppm-work-items-view__more
+4569	10.56px	0.66rem	.ppm-work-items-view__group > header strong
+4576	9.28px	0.58rem	.ppm-work-items-view__group > header small
+4626	8.48px	0.53rem	.ppm-work-items-view-card__title > span
+4634	10.72px	0.67rem	.ppm-work-items-view-card__title > strong
+4669	8.64px	0.54rem	.ppm-work-items-view-card__fields select, .ppm-work-items-view-card__fields input
+4696	10.88px	0.68rem	.ppm-work-items-view__loading, .ppm-work-items-view__empty
+4710	9.92px	0.62rem	.ppm-work-items-view__error
