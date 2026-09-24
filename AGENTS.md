@@ -11,8 +11,12 @@ PPM — система интеллекта проекта для несколь
 - Project Canvas как визуальный граф проекта;
 - Project Vault для Markdown и файлов;
 - Project Brain для RAG, графа знаний и памяти;
-- Git provider для repositories, commits и pull requests;
-- AI-агентов, работающих через preview, approval и audit.
+- Git provider для repositories, commits и pull requests.
+
+Решение владельца от 2026-09-23: AI-провайдеры, генеративный Ask Project и проектные агенты
+исключены из текущей очереди и release gate. Их существующий код и
+исторические карточки сохраняются, новые работы по ним не начинать
+без отдельного решения. Актуальный объём см. в документе 22.
 
 Текущий код — desktop-прототип AntyFlow. Не предполагай, что целевая web-архитектура уже реализована.
 

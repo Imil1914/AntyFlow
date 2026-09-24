@@ -2,9 +2,9 @@
 type: git_architecture
 project_id: intellect-ppm
 status: current
-version: 3
+version: 4
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-19
 ---
 
 # 10 — Git и контур разработки
@@ -58,6 +58,12 @@ PPM               связывает, отображает, индексируе
 - PPM skin/API integration.
 
 Даже в bundled режиме Forgejo остаётся владельцем Git data.
+
+### G1.3 — write actions с подтверждением
+
+Создание branch и draft pull request выделяется в отдельный обязательный gate. Read-only provider connection не
+считается полной Git-интеграцией. Любое write action показывает repository, base/head, Work Item, title/body и
+provider identity, требует явного approve и использует idempotency key. Автоматический merge не допускается.
 
 ## Пользовательский поток
 
@@ -216,3 +222,4 @@ Semantic relations:
 7. VS Code и Codex работают через обычный clone URL.
 8. Canvas projection ведёт к canonical Git object.
 9. Code RAG цитирует commit SHA и path.
+10. Branch и draft PR создаются только после preview/approve, а повтор запроса не создаёт дубликат.

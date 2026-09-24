@@ -1,7 +1,7 @@
 ---
 id: project-intellect-ppm
 created: 2026-09-11
-updated: 2026-09-13
+updated: 2026-09-20
 type: project
 project_home: true
 project_id: intellect-ppm
@@ -15,7 +15,7 @@ related_domains:
 owner: "Мамин И."
 team:
   - Мамин
-next_action: "Начать I0.5: server persistence, версии и права Canvas"
+next_action: "Провести owner review I1.1, затем перейти к I1.2"
 tags:
   - type/project
   - domain/intellect
@@ -43,8 +43,10 @@ AntyFlow-first web-платформа для 5–20 команд проектн�
 - Автоматические проверки I0.3 проходят: brand tests/audit, navigation tests, typecheck, lint, production PPM build и rollback Plane build.
 - I0.4 принята владельцем 2026-09-13: browser-safe `Мозг проекта` поддерживает note/group, визуальные стрелки, локальное сохранение, project isolation и read-only режим.
 - Автоматические проверки I0.4, production/rollback builds, ручной Canvas smoke и повторный контейнерный auth/outsider smoke через Plane API проходят.
+- I1.1 реализована локально и передана на owner review: Vault поддерживает backlinks/graph, stable rename/move,
+  версии и restore, корзину, ZIP export и явный обмен с `Документами` с provenance.
 - **Ответственный:** Мамин И.
-- **Статус:** I0.4 принята; следующая карточка — I0.5.
+- **Статус:** I1.1 в `review`; `accepted` выставляет только владелец.
 
 ## Документация
 
@@ -58,12 +60,17 @@ AntyFlow-first web-платформа для 5–20 команд проектн�
 
 ## Следующий шаг
 
-- [ ] Провести owner review I0.1 и I0.2, не меняя их на `accepted` автоматически.
-- [x] Провести owner review I0.4; интеграционный auth/outsider smoke пройден.
-- [ ] После `accepted` начать I0.5: server persistence, версии и права Canvas.
-- [ ] Не добавлять server persistence и Work Item projection до I0.5/I0.6.
+- [ ] Провести owner review I1.1 по сценарию из карточки, не выставляя `accepted` автоматически.
+- [ ] После решения владельца перейти к I1.2 — Semantic GraphRAG и память проекта.
+- [ ] I0.10 оставить после AF1.2; не возвращать циклическую зависимость I1.1 от release gate.
 
 ## Журнал изменений
+
+### 2026-09-20
+
+- I1.1 доведена до `review`: добавлены backlinks/graph, stable rename/move, версии/restore, корзина, безопасный ZIP и
+  явный Page↔Markdown transfer с provenance; общий backend regression, web/Canvas tests, build и browser smoke прошли.
+- Исправлена циклическая зависимость: I1.1 теперь зависит от I0.7 и AF0.5, а I0.10 остаётся release gate после AF1.2.
 
 ### 2026-09-13
 

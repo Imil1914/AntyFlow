@@ -2,12 +2,16 @@
 type: api_spec
 project_id: intellect-ppm
 status: current
-version: 3
+version: 6
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-23
 ---
 
 # 06 — API, события и синхронизация
+
+Описанные ниже agent events относятся к сохранённому историческому коду, а не
+к действующему плану работ. Контракты текущего PPM 1.0 охватывают Plane,
+Canvas, Vault, поиск Project Brain и Git.
 
 ## Общий URL-контекст
 
@@ -20,13 +24,14 @@ updated: 2026-09-12
 Сервер не доверяет route IDs и для каждого запроса:
 
 1. проверяет Plane session;
-2. загружает membership workspace;
-3. проверяет доступ к project;
-4. проверяет capability конкретной операции;
-5. валидирует payload;
-6. выполняет mutation в транзакции;
-7. пишет audit/outbox event;
-8. возвращает безопасный результат.
+2. проверяет защищённую global-admin role;
+3. для обычного пользователя загружает активный project membership;
+4. проверяет доступ к project;
+5. проверяет capability конкретной операции;
+6. валидирует payload и принадлежность board текущему Canvas;
+7. выполняет mutation в транзакции;
+8. пишет audit/outbox event;
+9. возвращает безопасный результат.
 
 ## Единый формат ошибок
 
@@ -46,31 +51,52 @@ UI показывает локализованное `message`; техничес
 ## Canvas API
 
 ```text
-GET    /canvas
-PUT    /canvas
-GET    /canvas/versions
-GET    /canvas/versions/:version
-POST   /canvas/bindings
-DELETE /canvas/bindings/:bindingId
-POST   /canvas/semantic-edges
-PATCH  /canvas/semantic-edges/:edgeId
-DELETE /canvas/semantic-edges/:edgeId
+GET    /canvas                                      metadata + ordered board list
+POST   /canvas/boards                               create board
+POST   /canvas/boards/reorder                       reorder active boards
+GET    /canvas/boards/:boardId                      board metadata + current snapshot
+PATCH  /canvas/boards/:boardId                      rename/settings
+POST   /canvas/boards/:boardId/duplicate            duplicate to a new board
+POST   /canvas/boards/:boardId/archive              soft archive
+POST   /canvas/boards/:boardId/restore              restore archived board
+PUT    /canvas/boards/:boardId/snapshot             save new immutable version
+GET    /canvas/boards/:boardId/versions             version list
+GET    /canvas/boards/:boardId/versions/:version    read version
+POST   /canvas/boards/:boardId/bindings
+DELETE /canvas/boards/:boardId/bindings/:bindingId
+POST   /canvas/boards/:boardId/semantic-edges
+PATCH  /canvas/boards/:boardId/semantic-edges/:edgeId
+DELETE /canvas/boards/:boardId/semantic-edges/:edgeId
 ```
 
-### `PUT /canvas`
+`GET /canvas` не возвращает snapshots всех досок. На переходном этапе старые `GET/PUT /canvas` читают/сохраняют
+только default board и помечаются deprecated после миграции клиентов.
+
+### `PUT /canvas/boards/:boardId/snapshot`
 
 Запрос:
 
 ```json
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "base_version": 12,
   "snapshot": {},
   "client_operation_id": "uuid"
 }
 ```
 
-Ответ содержит новую `version`, `content_hash`, `saved_at`. Если `base_version` устарел, сервер отвечает `409 CANVAS_VERSION_CONFLICT` и не перезаписывает новую версию.
+Ответ содержит `board_id`, новую `version`, `content_hash`, `saved_at`. Если `base_version` устарел, сервер отвечает
+`409 CANVAS_VERSION_CONFLICT` и не перезаписывает новую версию. Несовпадение `projectId/canvasId/boardId` возвращает
+deny/not found без раскрытия чужих metadata.
+
+### Lifecycle доски
+
+- create/duplicate/reorder идемпотентны по `client_operation_id`;
+- имя проверяется и нормализуется внутри текущего Canvas;
+- архивирование последней активной доски запрещено;
+- duplicate копирует snapshot и bindings как новые board-scoped records, но не дублирует source entities;
+- restore не перезаписывает более новую доску с тем же normalized name молча;
+- hard delete отсутствует в пользовательском API.
 
 ## Projection API
 
@@ -116,6 +142,13 @@ POST /knowledge/sources/:type/:id/index
 POST /knowledge/reindex
 GET  /knowledge/jobs/:jobId
 POST /knowledge/query
+GET  /knowledge/memory
+POST /knowledge/memory
+PATCH /knowledge/memory/:memoryId
+POST /knowledge/answers
+GET  /knowledge/answers/:runId
+POST /knowledge/answers/:runId/cancel
+GET  /knowledge/answers/:runId/events
 GET  /knowledge/health
 ```
 
@@ -126,13 +159,22 @@ GET  /knowledge/health
   "query": "Что блокирует испытания?",
   "scope": {
     "canvas_id": "uuid",
+    "board_id": "uuid",
     "selected_shape_ids": ["shape:1", "shape:2"],
-    "include_neighbors_depth": 1,
+    "graph_depth": 1,
     "source_types": ["work_item", "page", "vault_file"]
   },
   "top_k": 12
 }
 ```
+
+`graph_depth` принимает `0–2`. Обход идёт только по `confirmed` semantic edges текущих workspace/project/board;
+ответ возвращает `retrieval.graph` с фактической глубиной, числом соседей и путями связей. При
+`PPM_BRAIN_GRAPH_ENABLED=0` выбранные источники остаются доступны, но соседний обход и graph bonus отключены.
+
+`POST /knowledge/memory` принимает тип записи, заголовок, текст, `client_operation_id` и 1–50 source references.
+Каждая ссылка проверяется в текущем проекте и фиксирует `source_version`/locator. `PATCH` разрешает РП/редактору
+подтвердить либо отклонить только `proposed` запись; agent-origin никогда не подтверждается автоматически.
 
 Ответ:
 
@@ -208,7 +250,8 @@ POST   /git/webhooks/:provider/:connectionId
 - `plane.work_item.created|updated|deleted`;
 - `plane.page.created|updated|deleted`;
 - `plane.attachment.created|deleted`;
-- `canvas.saved`;
+- `canvas.board.created|renamed|reordered|duplicated|archived|restored`;
+- `canvas.board.saved`;
 - `canvas.semantic_edge.created|updated|deleted`;
 - `vault.file.created|updated|moved|deleted|restored`;
 - `knowledge.source.index.requested|ready|failed|deleted`;
@@ -242,7 +285,10 @@ Mutation canonical data и запись outbox происходят в одно�
 
 ## Realtime
 
-MVP допускает snapshot save с optimistic concurrency. Realtime Canvas включается после проверки auth bridge. Presence не является правом доступа: подключение к room разрешает сервер на основании Plane membership.
+До realtime доска сохраняется через optimistic concurrency. Realtime room имеет scope
+`workspace_id/project_id/canvas_id/board_id`; подключение разрешает сервер после проверки global-admin role либо
+активного ProjectMember. Presence не является правом доступа. Revoke membership закрывает новые соединения и
+принудительно завершает активную сессию в пределах короткого TTL/invalidation budget.
 
 ## Таймауты и деградация
 

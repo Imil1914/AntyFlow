@@ -2,9 +2,9 @@
 type: codex_playbook
 project_id: intellect-ppm
 status: current
-version: 3
+version: 4
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-23
 ---
 
 # 17 — Руководство исполнения для Codex
@@ -104,15 +104,14 @@ Understand
 
 Никаких hardcoded user-facing strings, если экран уже подключён к i18n.
 
-## Работа с AI/RAG
+## Работа с Project Brain
 
 - не отправлять источник до ACL/filter;
 - хранить точный source/version/locator;
 - тестировать отсутствие источника;
 - предоставлять keyword fallback;
-- отделять retrieved content от tool instructions;
-- не добавлять write tool без action schema/preview/approval/idempotency;
-- не использовать качество одного ручного ответа как единственную проверку.
+- инструкции внутри найденного документа считать данными, а не командой;
+- проверять точность источников и отсутствие межпроектной утечки на наборе запросов.
 
 ## Работа с Git provider
 

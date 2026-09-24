@@ -1,6 +1,10 @@
 # PPM — система интеллекта проекта
 
-PPM объединяет управление работой, визуальный холст, проектные знания, AI-поиск и разработку в одной среде для команд.
+PPM объединяет управление работой, визуальный холст, проектные знания, поиск и разработку в одной среде для команд.
+
+Решение владельца от 2026-09-23: AI-провайдеры, генеративный Ask Project, AI-чат и проектные агенты
+исключены из текущего плана и критериев выпуска. Ранее созданный код
+сохраняется; актуальная очередь — [в мастер-плане](<docs/project-spec/Документация PPM/Intelligence-first/22 — Полный план завершения PPM.md>).
 
 ```text
 Plane-powered · AntyFlow-faced · Vault-backed · Graph/RAG-assisted · Git-connected
@@ -12,14 +16,22 @@ Plane-powered · AntyFlow-faced · Vault-backed · Graph/RAG-assisted · Git-con
 
 - **в коде сейчас** — рабочий desktop-прототип AntyFlow на Electron, React и tldraw;
 - **целевая система** — многокомандный web-продукт PPM с Plane Community как внутренним движком;
-- **актуальное ТЗ** — редакция Intelligence-first v3;
-- **I0.1 принята** — чистый Plane `v1.4.2` закреплён, а golden path и persistence после restart подтверждены CI;
+- **актуальное ТЗ** — редакция Intelligence-first v5 с полным планом PPM, AntyFlow Canvas и Git-контуром;
+- **I0.1 на owner review** — чистый Plane `v1.4.2` закреплён, а golden path и persistence после restart подтверждены CI;
 - **I0.3 принята владельцем** — PPM shell, русский first path, единый login и role-safe project navigation зафиксированы отдельными локальными коммитами;
 - **I0.4 принята владельцем** — открыт browser-safe `Мозг проекта` на tldraw с note/group, визуальными стрелками, project-scoped local persistence и read-only режимом;
 - **I0.5 принята владельцем** — Canvas хранится на сервере, переживает restart, создаёт immutable versions, соблюдает project roles и защищён от silent overwrite;
-- **следующая задача** — проекция Plane Work Item на Canvas по карточке I0.6.
+- **I0.6 готова к owner review** — Canvas показывает live-проекции Plane Work Items, поддерживает безопасные quick edits и не создаёт вторую базу задач.
+- **I1.1 готова к owner review** — Project Vault поддерживает wiki-ссылки/backlinks, карту связей, rename/move,
+  версии, корзину, безопасный ZIP и явный обмен с `Документами`.
+- **I1.2 готова к owner review** — подтверждённые semantic edges участвуют в GraphRAG с глубиной `0–2` и
+  объяснимым путём, а решения/сводки Project Memory хранят версии источников и помечаются устаревшими.
+- **новый приоритет AF** — перенести вид и функциональность desktop AntyFlow в web PPM: один Canvas проекта,
+  много общих досок, командный доступ и protected global admin для всех проектов.
+- **Git включён в обязательный план PPM 1.0** — repository links, provider/webhooks, branches, commits, pull requests,
+  Canvas projections, code RAG и write actions с preview/approve.
 
-Это важно: существующий Electron-код не выдаётся за готовую web-платформу. Он служит проверенным источником Canvas, Vault, графа, AI-нод и других функций, которые будут переноситься поэтапно.
+Это важно: существующий Electron-код не выдаётся за готовую web-платформу. Он служит источником Canvas, Vault и графа; AI-функции desktop-прототипа сейчас не переносятся.
 
 ## Что должно получиться
 
@@ -29,9 +41,8 @@ Plane-powered · AntyFlow-faced · Vault-backed · Graph/RAG-assisted · Git-con
 | Plane Engine | пользователи, проекты, Work Items, Cycles, Modules, Views и Pages | Plane |
 | Project Canvas | визуальные проекции объектов и смысловые связи | PPM |
 | Project Vault | папки, Markdown, PDF и файлы | PPM Vault |
-| Project Brain | hybrid RAG, граф знаний, память и ответы с источниками | производный индекс PPM |
+| Project Brain | индекс, поиск, граф знаний, память и проверяемые источники без AI-модели | производный индекс PPM |
 | Git contour | repositories, branches, commits и pull requests | Git provider |
-| Agents | анализ и предложения изменений через preview/approve | PPM orchestration |
 
 Ключевой принцип: одна сущность имеет одного владельца. Canvas показывает проекцию задачи или файла, но не создаёт их вторую независимую копию.
 
@@ -53,12 +64,15 @@ Plane-powered · AntyFlow-faced · Vault-backed · Graph/RAG-assisted · Git-con
 
 Начинать следует отсюда:
 
-1. [Каноническое ТЗ Intelligence-first v3](<docs/project-spec/Документация PPM/Intelligence-first/README.md>)
+1. [Каноническое ТЗ Intelligence-first v5](<docs/project-spec/Документация PPM/Intelligence-first/README.md>)
 2. [Принятое архитектурное решение](<docs/project-spec/Документация PPM/Intelligence-first/Решение — AntyFlow-first система интеллекта проекта.md>)
 3. [План реализации и релизы](<docs/project-spec/Документация PPM/Intelligence-first/15 — План реализации и релизы.md>)
 4. [Очередь исполнимых задач](<docs/project-spec/Документация PPM/Intelligence-first/tasks/README.md>)
 5. [Руководство исполнения для Codex](<docs/project-spec/Документация PPM/Intelligence-first/17 — Руководство исполнения для Codex.md>)
 6. [Матрица требований и тестов](<docs/project-spec/Документация PPM/Intelligence-first/20 — Матрица требований и трассировка.md>)
+7. [Решение о полном AntyFlow Canvas](<docs/project-spec/Документация PPM/Intelligence-first/Решение — Полноценный AntyFlow Canvas в web PPM.md>)
+8. [Матрица desktop → web](<docs/project-spec/Документация PPM/Intelligence-first/21 — Матрица переноса AntyFlow desktop в web.md>)
+9. [Полный план завершения PPM](<docs/project-spec/Документация PPM/Intelligence-first/22 — Полный план завершения PPM.md>)
 
 Полный архив документации, включая исторические редакции: [docs/project-spec](<docs/project-spec/README.md>).
 
@@ -107,6 +121,10 @@ npm run plane:bootstrap
 npm run plane:verify
 ```
 
+Если рабочая ветка уже содержит последующие PPM-задачи, неизменяемый upstream baseline проверяется без отката
+командой `npm run plane:verify:baseline`; строгий `plane:verify` остаётся release-gate для чистого закреплённого
+integration checkout.
+
 Полный безопасный запуск, golden smoke и restart-проверка: [infra/plane/README.md](infra/plane/README.md). Лицензия и происхождение Plane зафиксированы в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ## Настройка AI в прототипе
@@ -141,13 +159,22 @@ AGENTS.md                  обязательные правила для Codex 
 5. Реализовать изменение, выполнить указанные проверки и оформить небольшой reviewable commit.
 6. Не ставить `accepted` самостоятельно: финальную приёмку делает владелец.
 
-Следующая карточка: [I0.5 — Canvas persistence, версии и права](<docs/project-spec/Документация PPM/Intelligence-first/tasks/I0.5 — Canvas persistence, версии и права.md>).
+Текущие gates: owner review
+[I1.2 — Semantic GraphRAG и память проекта](<docs/project-spec/Документация PPM/Intelligence-first/tasks/I1.2 — Semantic GraphRAG и память проекта.md>),
+[G1.1 — GitHub provider и webhooks](<docs/project-spec/Документация PPM/Intelligence-first/tasks/G1.1 — Первый внешний Git provider и webhooks.md>)
+и [G1.2 — Git projections и code RAG](<docs/project-spec/Документация PPM/Intelligence-first/tasks/G1.2 — Git projections и code RAG.md>).
+GitHub App, подписанный repository webhook, reconciliation, project-scoped RBAC, Git projections на Canvas,
+безопасная opt-in индексация кода, точные citations и disconnect/purge/reconnect проверены на реальном репозитории.
+Ранее реализованный локальный agent foundation I1.3 сохранён в коде и
+исторической [карточке](<docs/project-spec/Документация PPM/Intelligence-first/tasks/I1.3 — Проектные агенты и approval actions.md>).
+Эта линия отложена и не входит в текущую очередь или release gate.
+[Инструкция настройки GitHub App](docs/ppm/github-app-setup.md).
 
 ## Безопасность
 
 - не коммитьте `.env`, API keys, tokens, cookies и пользовательские данные;
 - не помещайте secrets в Canvas snapshots, логи или тестовые fixtures;
-- любые AI-записи в задачи, документы и Git требуют preview, подтверждения и аудита;
+- существующие AI-записи не входят в текущую очередь и не должны включаться без отдельного решения владельца;
 - доступ к Vault, RAG и Git всегда ограничивается текущим workspace/project.
 
 ## Лицензирование
