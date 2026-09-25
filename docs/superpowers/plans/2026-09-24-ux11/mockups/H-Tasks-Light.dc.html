@@ -1,0 +1,365 @@
+<!doctype html>
+<html lang="ru">
+<head>
+<meta charset="utf-8">
+<title>H · Задачи · светлая · удобная</title>
+<script src="./support.js"></script>
+</head>
+<body>
+<x-dc>
+<helmet>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&amp;family=IBM+Plex+Sans:wdth,wght@85..100,400..600&amp;display=swap">
+<style>
+body{margin:0;font-family:"IBM Plex Sans",system-ui,sans-serif;background:#f2efea;-webkit-font-smoothing:antialiased}
+a{color:#46423d;text-decoration:none}a:hover{color:#1d1a17}
+button{font-family:inherit;margin:0;cursor:pointer}
+.ppm-in::placeholder{color:#67625d;opacity:1}
+.ppm-sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+</style>
+</helmet>
+<div style="width: 1440px; height: 900px; box-sizing: border-box; overflow: hidden; position: relative; display: flex; flex-direction: column; background: #f2efea; color: #1d1a17; font: 400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;">
+
+<header style="flex:none;height:48px;box-sizing:border-box;position:relative;display:flex;align-items:center;gap:8px;padding:0 12px 0 8px;background:#f2efea">
+  <button type="button" aria-label="Пространство: Проектная школа «Интеллект». Открыть меню пространства" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px 0 4px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:#1d1a17;font:500 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:#e8e5df;color:#1d1a17;font:600 12px/1 'IBM Plex Sans',system-ui,sans-serif">И</span>Проектная школа «Интеллект»<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></button>
+  <label style="position:absolute;left:500px;top:8px;width:440px;height:32px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 6px 0 10px;border:1px solid #847f7a;border-radius:6px;background:#ffffff;cursor:text">
+    <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><circle cx="7" cy="7" r="4.25"></circle><path d="M10.25 10.25 13.25 13.25"></path></svg>
+    <span class="ppm-sr">Поиск команд</span>
+    <input class="ppm-in" type="text" placeholder="Поиск команд…" style="flex:1;min-width:0;height:100%;padding:0;border:0;outline:0;background:transparent;color:#1d1a17;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif">
+    <kbd style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:4px;border:1px solid #847f7a;background:#ffffff;color:#46423d;font:500 11px/16px 'IBM Plex Mono',ui-monospace,monospace;box-sizing:border-box;white-space:nowrap">Ctrl K</kbd>
+  </label>
+  <div style="margin-left:auto;display:flex;align-items:center;gap:4px">
+    <a href="#" aria-label="Входящие: есть непрочитанные" title="Входящие" style="position:relative;display:flex;align-items:center;justify-content:center;width:32px;height:32px;border-radius:6px;color:#46423d"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><path d="M2.75 9h2.75l1 1.75h3L10.5 9h2.75"></path><path d="M2.75 9 4.25 3.75h7.5L13.25 9v3.25a1 1 0 0 1-1 1h-8.5a1 1 0 0 1-1-1Z"></path></svg><span aria-hidden="true" style="position:absolute;top:7px;right:7px;width:6px;height:6px;border-radius:50%;background:#1d1a17;box-shadow:0 0 0 2px #f2efea"></span></a>
+    <button type="button" aria-label="Помощь" title="Помощь" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:6px;background:transparent;color:#46423d"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><circle cx="8" cy="8" r="5.75"></circle><path d="M6.25 6.4a1.8 1.8 0 0 1 3.5.6c0 1.2-1.75 1.5-1.75 2.6"></path><path d="M8 11.6v.05"></path></svg></button>
+    <button type="button" aria-label="Профиль: Анна Л." style="display:flex;align-items:center;justify-content:center;width:32px;height:32px;padding:0;border:0;border-radius:50%;background:transparent"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">АЛ</span></button>
+  </div>
+</header>
+<div style="flex:1;min-height:0;margin:0 8px 8px;box-sizing:border-box;display:flex;border:1px solid #ded9d4;border-radius:8px;background:#fcfaf7;overflow:hidden">
+
+<nav aria-label="Боковая панель" style="flex:none;width:232px;box-sizing:border-box;display:flex;flex-direction:column;padding:8px;border-right:1px solid #ded9d4">
+  <div style="flex:none;display:flex;align-items:center;gap:8px;height:40px;padding:0 0 0 8px">
+    <svg width="18" height="18" viewBox="0 0 16 16" fill="none" aria-hidden="true" style="flex:none;display:block"><path d="M3.75 3.75 12.25 8 5.25 12.25" stroke="#1d1a17" stroke-width="1.5" stroke-linejoin="round" stroke-linecap="round"></path><circle cx="3.75" cy="3.75" r="2" fill="#1d1a17"></circle><circle cx="12.25" cy="8" r="2" fill="#1d1a17"></circle><circle cx="5.25" cy="12.25" r="2" fill="#1d1a17"></circle></svg>
+    <span style="color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0.06em">PPM</span>
+    <span style="margin-left:auto;display:flex"><button type="button" aria-label="Свернуть боковую панель" title="Свернуть боковую панель" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:#615d58"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.5"></rect><path d="M6.25 2.75v10.5"></path></svg></button></span>
+  </div>
+  <button type="button" style="flex:none;margin-top:4px;display:flex;align-items:center;gap:8px;height:32px;padding:0 10px;box-sizing:border-box;border:1px solid #847f7a;border-radius:6px;background:#ffffff;color:#1d1a17;font:500 13px/20px 'IBM Plex Sans',system-ui,sans-serif"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#46423d"><path d="M7.25 2.75H4a1.25 1.25 0 0 0-1.25 1.25v8A1.25 1.25 0 0 0 4 13.25h8A1.25 1.25 0 0 0 13.25 12V8.75"></path><path d="m11.25 2.5 2.25 2.25-5 5H6.25V7.5Z"></path></svg>Новая задача</button>
+  <div style="flex:none;margin-top:8px;display:flex;flex-direction:column;gap:2px">
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M2.75 7 8 2.75 13.25 7v6.25H2.75Z"></path><path d="M6.25 13.25v-3.5h3.5v3.5"></path></svg><span>Главная</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M9.5 2.75H4.75a1 1 0 0 0-1 1v8.5a1 1 0 0 0 1 1h6.5a1 1 0 0 0 1-1V8"></path><path d="m11.5 2.5 1.75 1.75L9 8.5H7.25V6.75Z"></path></svg><span>Черновики</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><circle cx="8" cy="8" r="5.25"></circle><path d="m5.75 8 1.5 1.5 3-3"></path></svg><span>Мои задачи</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M3 2.75h10v6.5l-4 4H3Z"></path><path d="M13 9.25H9v4"></path></svg><span>Мои заметки</span></a>
+  </div>
+  <div style="flex:none;margin-top:16px;height:20px;display:flex;align-items:center;padding:0 8px;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Мои проекты</div>
+  <button type="button" aria-expanded="true" style="flex:none;margin-top:4px;display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:#1d1a17;font:500 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;background:#d5e9cb;color:#345123;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif">Р</span><span>Робот-сортировщик</span><span style="margin-left:auto;display:flex"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></span></button>
+  <div style="flex:none;margin:2px 0 0 17px;padding-left:6px;border-left:1px solid #ded9d4;display:flex;flex-direction:column;gap:2px">
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M2.75 11.25a5.25 5.25 0 1 1 10.5 0"></path><path d="m8 11.25 2.5-3.25"></path><path d="M2.75 13.25h10.5"></path></svg><span>Обзор</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><circle cx="5.5" cy="5.5" r="2.75"></circle><rect x="8.25" y="8.25" width="5" height="5" rx="1"></rect></svg><span>Холст</span></a>
+    <div style="height:28px;box-sizing:border-box;display:flex;align-items:flex-end;padding:0 8px 4px;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Работа</div>
+    <a href="#" aria-current="page" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:#e8e5df;color:#1d1a17;font:500 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#1d1a17"><rect x="2.75" y="2.75" width="10.5" height="10.5" rx="2.25"></rect><path d="m5.5 8 1.75 1.75L10.5 6.5"></path></svg><span>Задачи</span><span style="margin-left:auto;color:#615d58;font:400 11px/16px 'IBM Plex Mono',ui-monospace,monospace">7</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="m8 2.5 5.25 2.75L8 8 2.75 5.25Z"></path><path d="m2.75 8.25 5.25 2.75 5.25-2.75"></path><path d="m2.75 11 5.25 2.75L13.25 11"></path></svg><span>Фильтры задач</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><circle cx="8" cy="9" r="4.75"></circle><path d="M8 9V6.5M6.25 1.75h3.5"></path></svg><span>Спринты</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M8 2.25v11.5"></path><path d="M8 3.75h4.25l1.25 1.5-1.25 1.5H8"></path><path d="M8 8.25H3.75L2.5 9.75l1.25 1.5H8"></path></svg><span>Направления</span></a>
+    <div style="height:28px;box-sizing:border-box;display:flex;align-items:flex-end;padding:0 8px 4px;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Знания</div>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><rect x="2.25" y="3" width="11.5" height="3" rx="0.75"></rect><path d="M3.25 6v6.25a1 1 0 0 0 1 1h7.5a1 1 0 0 0 1-1V6"></path><path d="M6.5 8.75h3"></path></svg><span>Хранилище</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M4 2.25h5l3 3v8.5H4Z"></path><path d="M9 2.25v3h3"></path><path d="M6 8.5h4M6 11h4"></path></svg><span>Документы</span></a>
+    <span aria-hidden="true" style="height:4px"></span>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M5.5 4.5 2.5 8l3 3.5M10.5 4.5l3 3.5-3 3.5"></path></svg><span>Код</span></a>
+    <a href="#" style="display:flex;align-items:center;gap:8px;height:32px;padding:0 8px;box-sizing:border-box;border-radius:6px;background:transparent;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><path d="M2.75 4.75h6M11.75 4.75h1.5M2.75 11.25h1.5M7.25 11.25h6"></path><circle cx="10.25" cy="4.75" r="1.5"></circle><circle cx="5.75" cy="11.25" r="1.5"></circle></svg><span>Настройки проекта</span></a>
+  </div>
+</nav>
+
+<main aria-label="Задачи проекта ROBOT" style="flex:none;width:886px;min-width:0;display:flex;flex-direction:column">
+  
+  <div style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:16px;padding:0 24px">
+    <nav aria-label="Путь" style="display:flex;align-items:center;gap:6px;white-space:nowrap">
+      <span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:5px;background:#d5e9cb;color:#345123;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif">Р</span>
+      <a href="#" style="margin-left:2px;color:#46423d;font:500 13px/20px 'IBM Plex Sans',system-ui,sans-serif">ROBOT</a>
+      <svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m6.5 4.75 3.25 3.25-3.25 3.25"></path></svg>
+      <h1 style="margin:0;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">Задачи</h1>
+      <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">7</span>
+    </nav>
+    <div style="display:flex;align-items:center;gap:2px;height:28px;padding:0 1px;box-sizing:border-box;border:1px solid #847f7a;border-radius:6px">
+      <button type="button" aria-pressed="true" style="display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;box-sizing:border-box;border:0;border-radius:4px;background:#e8e5df;color:#1d1a17;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#1d1a17"><path d="M5.75 4h7.5M5.75 8h7.5M5.75 12h7.5M2.75 4h.5M2.75 8h.5M2.75 12h.5"></path></svg>Список</button>
+      <button type="button" aria-pressed="false" style="display:flex;align-items:center;gap:6px;height:24px;padding:0 8px;box-sizing:border-box;border:0;border-radius:4px;background:transparent;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#615d58"><rect x="2.75" y="2.75" width="3" height="10.5" rx="0.75"></rect><rect x="6.5" y="2.75" width="3" height="7" rx="0.75"></rect><rect x="10.25" y="2.75" width="3" height="8.5" rx="0.75"></rect></svg>Доска</button>
+    </div>
+    <button type="button" style="margin-left:auto;display:flex;align-items:center;gap:8px;height:32px;padding:0 6px 0 10px;box-sizing:border-box;border:0;border-radius:6px;background:#126a88;color:#fdfbf9;font:500 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#fdfbf9"><path d="M8 3.25v9.5M3.25 8h9.5"></path></svg>Новая задача<span class="ppm-sr">, клавиши N, затем I</span><span aria-hidden="true" style="display:inline-flex;margin-left:2px"><span style="display:inline-flex;align-items:center;gap:4px"><kbd style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:4px;border:1px solid #004f69;background:#004f69;color:#fdfbf9;font:500 11px/16px 'IBM Plex Mono',ui-monospace,monospace;box-sizing:border-box;white-space:nowrap">N</kbd><kbd style="display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 4px;border-radius:4px;border:1px solid #004f69;background:#004f69;color:#fdfbf9;font:500 11px/16px 'IBM Plex Mono',ui-monospace,monospace;box-sizing:border-box;white-space:nowrap">I</kbd></span></span></button>
+  </div>
+  
+  <section aria-label="Спринт 3" style="flex:none;margin:0 24px;height:60px;box-sizing:border-box;display:flex;align-items:center;gap:20px;padding:0 16px 0 12px;border:1px solid #ded9d4;border-radius:8px">
+    <button type="button" aria-label="Спринт 3, 16–29 сент. Сменить спринт" style="flex:none;width:88px;box-sizing:border-box;display:flex;flex-direction:column;align-items:flex-start;padding:2px 4px;border:0;border-radius:6px;background:transparent;text-align:left">
+      <span style="display:flex;align-items:center;gap:4px;color:#1d1a17;font:600 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Спринт 3<svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></span>
+      <span style="color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">16–29 сент.</span>
+    </button>
+    <svg width="584" height="44" viewBox="0 0 584 44" fill="none" role="img" aria-label="Шкала спринта: 16–29 сентября, сегодня 23-е, день 8 из 14" style="flex:none;display:block"><defs><pattern id="hatch-comfortable" width="4" height="4" patternUnits="userSpaceOnUse" patternTransform="rotate(45)"><path d="M0 0V4" stroke="#847f7a" stroke-width="1"></path></pattern></defs><rect x="8" y="18" width="305.8" height="7" fill="url(#hatch-comfortable)"></rect><path d="M8 25H576" stroke="#847f7a" stroke-width="1"></path><path d="M8 25V30" stroke="#847f7a" stroke-width="1"></path><text x="8" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">16</text><path d="M51.7 25V28" stroke="#847f7a" stroke-width="1"></path><text x="51.7" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">17</text><path d="M95.4 25V28" stroke="#847f7a" stroke-width="1"></path><text x="95.4" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">18</text><path d="M139.1 25V28" stroke="#847f7a" stroke-width="1"></path><text x="139.1" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">19</text><path d="M182.8 25V28" stroke="#847f7a" stroke-width="1"></path><text x="182.8" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">20</text><path d="M226.5 25V30" stroke="#847f7a" stroke-width="1"></path><text x="226.5" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">21</text><path d="M270.2 25V28" stroke="#847f7a" stroke-width="1"></path><text x="270.2" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">22</text><path d="M313.8 25V28" stroke="#847f7a" stroke-width="1"></path><text x="313.8" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="500" fill="#1d1a17">23</text><path d="M357.5 25V28" stroke="#847f7a" stroke-width="1"></path><text x="357.5" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">24</text><path d="M401.2 25V28" stroke="#847f7a" stroke-width="1"></path><text x="401.2" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">25</text><path d="M444.9 25V28" stroke="#847f7a" stroke-width="1"></path><text x="444.9" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">26</text><path d="M488.6 25V28" stroke="#847f7a" stroke-width="1"></path><text x="488.6" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">27</text><path d="M532.3 25V30" stroke="#847f7a" stroke-width="1"></path><text x="532.3" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">28</text><path d="M576 25V30" stroke="#847f7a" stroke-width="1"></path><text x="576" y="41" text-anchor="middle" font-family="IBM Plex Mono, monospace" font-size="11" font-weight="400" fill="#615d58">29</text><path d="M313.8 14V31" stroke="#1d1a17" stroke-width="2" stroke-linecap="round"></path><text x="313.8" y="10" text-anchor="middle" font-family="IBM Plex Sans, sans-serif" font-size="11" font-weight="500" fill="#1d1a17">сегодня</text></svg>
+    <div style="flex:none;width:96px;text-align:right;white-space:nowrap">
+      <div style="color:#1d1a17;font:500 13px/20px 'IBM Plex Sans',system-ui,sans-serif">День 8 из 14</div>
+      <div style="color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif">осталось 6 дней</div>
+    </div>
+  </section>
+  
+  <div style="flex:none;height:44px;box-sizing:border-box;display:flex;align-items:center;gap:2px;padding:0 16px">
+    <button type="button" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:#46423d;font:400 13px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M2.75 4h10.5M4.75 8h6.5M6.75 12h2.5"></path></svg>Фильтр</button>
+    <button type="button" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:#46423d;font:400 13px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><circle cx="8" cy="5.75" r="2.75"></circle><path d="M2.75 13.25c.75-2.5 2.75-3.75 5.25-3.75s4.5 1.25 5.25 3.75"></path></svg>Исполнитель<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></button>
+    <button type="button" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:#46423d;font:400 13px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M8 2.25v11.5"></path><path d="M8 3.75h4.25l1.25 1.5-1.25 1.5H8"></path><path d="M8 8.25H3.75L2.5 9.75l1.25 1.5H8"></path></svg>Направление<svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></button>
+    <div style="margin-left:auto;display:flex;align-items:center;gap:2px">
+      <button type="button" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:#46423d;font:400 13px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><rect x="2.75" y="2.75" width="10.5" height="4" rx="1"></rect><rect x="2.75" y="9.25" width="10.5" height="4" rx="1"></rect></svg>Группировка:<span style="color:#1d1a17">статус</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></button>
+      <button type="button" style="display:flex;align-items:center;gap:6px;height:28px;padding:0 8px;box-sizing:border-box;border:0;border-radius:6px;background:transparent;color:#46423d;font:400 13px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M5 3v10M2.75 10.75 5 13l2.25-2.25M11 13V3M8.75 5.25 11 3l2.25 2.25"></path></svg>Сортировка:<span style="color:#1d1a17">приоритет</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></button>
+    </div>
+  </div>
+  
+  <div style="flex:none;height:32px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-top:1px solid #ded9d4;border-bottom:1px solid #ded9d4;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">
+    <span></span><span>ID</span><span style="grid-column:3 / span 2">Задача</span><span>Направление</span><span>Материалы</span><span>Исполнитель</span><span style="text-align:right">Срок</span>
+  </div>
+  <div style="flex:1;min-height:0;overflow:hidden;display:flex;flex-direction:column">
+    <section aria-label="Бэклог: 1">
+      <div style="height:36px;box-sizing:border-box;display:flex;align-items:center;padding:0 18px 0 24px;background:#f6f3ef;border-bottom:1px solid #ded9d4">
+        <h2 style="margin:0;display:flex;min-width:0"><button type="button" aria-expanded="true" style="display:flex;align-items:center;gap:0;height:28px;padding:0 6px 0 0;border:0;border-radius:6px;background:transparent;white-space:nowrap">
+          <span style="width:16px;display:flex;justify-content:center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></span>
+          <span style="width:12px"></span>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#78746e" stroke-width="1.5" stroke-dasharray="2.1 2.02"></circle></svg>
+          <span style="margin-left:8px;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">Бэклог</span>
+          <span style="margin-left:8px;color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">1</span>
+        </button></h2>
+        
+        <span style="margin-left:auto;display:flex"><button type="button" aria-label="Новая задача в группе «Бэклог»" title="Новая задача в группе «Бэклог»" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:#78746e"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><path d="M8 3.25v9.5M3.25 8h9.5"></path></svg></button></span>
+      </div>
+      <a href="#" style="height:36px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-bottom:1px solid #ded9d4;color:#1d1a17">
+        <svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="Без приоритета" style="flex:none;display:block"><path d="M2 7h2M6 7h2M10 7h2" stroke="#847f7a" stroke-width="1.5" stroke-linecap="round"></path></svg>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap">ROBOT-18</span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" role="img" aria-label="Статус: Бэклог" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#78746e" stroke-width="1.5" stroke-dasharray="2.1 2.02"></circle></svg>
+        <span style="min-width:0;display:flex;align-items:center;gap:6px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d1a17;font:400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;">Видео для демо-дня</span>
+          
+        </span>
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:12px;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:8px;color:#615d58;font:400 12px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;box-sizing:border-box;width:20px;height:20px;border-radius:50%;border:1px dashed #847f7a"></span>Не назначен</span>
+        <span style="text-align:right;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap"></span>
+      </a>
+    </section>
+    <section aria-label="К работе: 1">
+      <div style="height:36px;box-sizing:border-box;display:flex;align-items:center;padding:0 18px 0 24px;background:#f6f3ef;border-bottom:1px solid #ded9d4">
+        <h2 style="margin:0;display:flex;min-width:0"><button type="button" aria-expanded="true" style="display:flex;align-items:center;gap:0;height:28px;padding:0 6px 0 0;border:0;border-radius:6px;background:transparent;white-space:nowrap">
+          <span style="width:16px;display:flex;justify-content:center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></span>
+          <span style="width:12px"></span>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#46423d" stroke-width="1.5"></circle></svg>
+          <span style="margin-left:8px;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">К работе</span>
+          <span style="margin-left:8px;color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">1</span>
+        </button></h2>
+        
+        <span style="margin-left:auto;display:flex"><button type="button" aria-label="Новая задача в группе «К работе»" title="Новая задача в группе «К работе»" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:#78746e"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><path d="M8 3.25v9.5M3.25 8h9.5"></path></svg></button></span>
+      </div>
+      <a href="#" style="height:36px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-bottom:1px solid #ded9d4;color:#1d1a17">
+        <svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="Без приоритета" style="flex:none;display:block"><path d="M2 7h2M6 7h2M10 7h2" stroke="#847f7a" stroke-width="1.5" stroke-linecap="round"></path></svg>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap">ROBOT-15</span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" role="img" aria-label="Статус: К работе" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#46423d" stroke-width="1.5"></circle></svg>
+        <span style="min-width:0;display:flex;align-items:center;gap:6px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d1a17;font:400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;font-stretch:85%;">Сценарий сортировки по 4 цветам</span>
+          <span style="flex:none;display:inline-flex;align-items:center;gap:3px;color:#b53530;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"><span class="ppm-sr">Заблокирована задачей</span><svg width="12" height="12" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#c44037"><path d="M2.5 8h8.75"></path><path d="M12.25 4.25v7.5"></path></svg>ROBOT-12</span>
+        </span>
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Софт</span>
+        <span style="min-width:0;display:flex;align-items:center;gap:12px;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:4px"><span class="ppm-sr">Материалов: 1</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M11.25 7.5 7.4 11.35a2.25 2.25 0 0 1-3.18-3.18l4.6-4.6a1.5 1.5 0 0 1 2.12 2.12l-4.42 4.42a.75.75 0 0 1-1.06-1.06l3.9-3.9"></path></svg><span aria-hidden="true" style="color:#46423d">1</span></span></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:8px;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">ДП</span>Даша П.</span>
+        <span style="text-align:right;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap"></span>
+      </a>
+    </section>
+    <section aria-label="В работе: 2">
+      <div style="height:36px;box-sizing:border-box;display:flex;align-items:center;padding:0 18px 0 24px;background:#f6f3ef;border-bottom:1px solid #ded9d4">
+        <h2 style="margin:0;display:flex;min-width:0"><button type="button" aria-expanded="true" style="display:flex;align-items:center;gap:0;height:28px;padding:0 6px 0 0;border:0;border-radius:6px;background:transparent;white-space:nowrap">
+          <span style="width:16px;display:flex;justify-content:center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></span>
+          <span style="width:12px"></span>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#ad721c" stroke-width="1.5"></circle><path d="M7 3.75a3.25 3.25 0 0 1 0 6.5Z" fill="#ad721c"></path></svg>
+          <span style="margin-left:8px;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">В работе</span>
+          <span style="margin-left:8px;color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">2</span>
+        </button></h2>
+        
+        <span style="margin-left:auto;display:flex"><button type="button" aria-label="Новая задача в группе «В работе»" title="Новая задача в группе «В работе»" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:#78746e"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><path d="M8 3.25v9.5M3.25 8h9.5"></path></svg></button></span>
+      </div>
+      <a href="#" style="height:36px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-bottom:1px solid #ded9d4;color:#1d1a17">
+        <svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="Приоритет: высокий" style="flex:none;display:block"><rect x="1.5" y="8" width="2.5" height="4.5" rx="0.75" fill="#46423d"></rect><rect x="5.75" y="5" width="2.5" height="7.5" rx="0.75" fill="#46423d"></rect><rect x="10" y="2" width="2.5" height="10.5" rx="0.75" fill="#46423d"></rect></svg>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap">ROBOT-12</span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" role="img" aria-label="Статус: В работе" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#ad721c" stroke-width="1.5"></circle><path d="M7 3.75a3.25 3.25 0 0 1 0 6.5Z" fill="#ad721c"></path></svg>
+        <span style="min-width:0;display:flex;align-items:center;gap:6px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d1a17;font:400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;">Откалибровать датчик цвета</span>
+          
+        </span>
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Софт</span>
+        <span style="min-width:0;display:flex;align-items:center;gap:12px;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:4px"><span class="ppm-sr">PR #48;</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#905845"><circle cx="4.5" cy="3.75" r="1.5"></circle><circle cx="4.5" cy="12.25" r="1.5"></circle><circle cx="11.5" cy="12.25" r="1.5"></circle><path d="M4.5 5.25v5.5"></path><path d="M11.5 10.75V7a2 2 0 0 0-2-2H7.25"></path><path d="m8.75 3.5-1.5 1.5 1.5 1.5"></path></svg><span aria-hidden="true" style="color:#46423d">#48</span></span><span style="display:inline-flex;align-items:center;gap:4px"><span class="ppm-sr">Материалов: 2</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M11.25 7.5 7.4 11.35a2.25 2.25 0 0 1-3.18-3.18l4.6-4.6a1.5 1.5 0 0 1 2.12 2.12l-4.42 4.42a.75.75 0 0 1-1.06-1.06l3.9-3.9"></path></svg><span aria-hidden="true" style="color:#46423d">2</span></span></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:8px;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">ДП</span>Даша П.</span>
+        <span style="text-align:right;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap">26 сент.</span>
+      </a>
+      <a href="#" style="height:36px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-bottom:1px solid #ded9d4;color:#1d1a17">
+        <svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="Без приоритета" style="flex:none;display:block"><path d="M2 7h2M6 7h2M10 7h2" stroke="#847f7a" stroke-width="1.5" stroke-linecap="round"></path></svg>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap">ROBOT-16</span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" role="img" aria-label="Статус: В работе" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#ad721c" stroke-width="1.5"></circle><path d="M7 3.75a3.25 3.25 0 0 1 0 6.5Z" fill="#ad721c"></path></svg>
+        <span style="min-width:0;display:flex;align-items:center;gap:6px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d1a17;font:400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;">Замерить скорость ленты</span>
+          
+        </span>
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Механика</span>
+        <span style="min-width:0;display:flex;align-items:center;gap:12px;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:8px;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">ОС</span>Олег С.</span>
+        <span style="text-align:right;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap"></span>
+      </a>
+    </section>
+    <section aria-label="На проверке: 1">
+      <div style="height:36px;box-sizing:border-box;display:flex;align-items:center;padding:0 18px 0 24px;background:#f6f3ef;border-bottom:1px solid #ded9d4">
+        <h2 style="margin:0;display:flex;min-width:0"><button type="button" aria-expanded="true" style="display:flex;align-items:center;gap:0;height:28px;padding:0 6px 0 0;border:0;border-radius:6px;background:transparent;white-space:nowrap">
+          <span style="width:16px;display:flex;justify-content:center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></span>
+          <span style="width:12px"></span>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#7c58a3" stroke-width="1.5"></circle><path d="M7 3.75A3.25 3.25 0 1 1 3.75 7H7Z" fill="#7c58a3"></path></svg>
+          <span style="margin-left:8px;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">На проверке</span>
+          <span style="margin-left:8px;color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">1</span>
+        </button></h2>
+        
+        <span style="margin-left:auto;display:flex"><button type="button" aria-label="Новая задача в группе «На проверке»" title="Новая задача в группе «На проверке»" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:#78746e"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><path d="M8 3.25v9.5M3.25 8h9.5"></path></svg></button></span>
+      </div>
+      <a href="#" style="height:36px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-bottom:1px solid #ded9d4;color:#1d1a17">
+        <svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="Без приоритета" style="flex:none;display:block"><path d="M2 7h2M6 7h2M10 7h2" stroke="#847f7a" stroke-width="1.5" stroke-linecap="round"></path></svg>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap">ROBOT-9</span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" role="img" aria-label="Статус: На проверке" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#7c58a3" stroke-width="1.5"></circle><path d="M7 3.75A3.25 3.25 0 1 1 3.75 7H7Z" fill="#7c58a3"></path></svg>
+        <span style="min-width:0;display:flex;align-items:center;gap:6px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d1a17;font:400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;">Собрать захват из 3D-деталей</span>
+          
+        </span>
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Механика</span>
+        <span style="min-width:0;display:flex;align-items:center;gap:12px;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:4px"><span class="ppm-sr">Материалов: 1</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M11.25 7.5 7.4 11.35a2.25 2.25 0 0 1-3.18-3.18l4.6-4.6a1.5 1.5 0 0 1 2.12 2.12l-4.42 4.42a.75.75 0 0 1-1.06-1.06l3.9-3.9"></path></svg><span aria-hidden="true" style="color:#46423d">1</span></span></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:8px;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">МК</span>Миша К.</span>
+        <span style="text-align:right;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap"></span>
+      </a>
+    </section>
+    <section aria-label="Готово: 2">
+      <div style="height:36px;box-sizing:border-box;display:flex;align-items:center;padding:0 18px 0 24px;background:#f6f3ef;border-bottom:1px solid #ded9d4">
+        <h2 style="margin:0;display:flex;min-width:0"><button type="button" aria-expanded="true" style="display:flex;align-items:center;gap:0;height:28px;padding:0 6px 0 0;border:0;border-radius:6px;background:transparent;white-space:nowrap">
+          <span style="width:16px;display:flex;justify-content:center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m4.75 6.5 3.25 3.25 3.25-3.25"></path></svg></span>
+          <span style="width:12px"></span>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex:none;display:block"><circle cx="7" cy="7" r="6" fill="#33854a"></circle><path d="m4.4 7.1 1.8 1.8 3.5-3.6" stroke="#fcfaf7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+          <span style="margin-left:8px;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">Готово</span>
+          <span style="margin-left:8px;color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">2</span>
+        </button></h2>
+        
+        <span style="margin-left:auto;display:flex"><button type="button" aria-label="Новая задача в группе «Готово»" title="Новая задача в группе «Готово»" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;padding:0;border:0;border-radius:6px;background:transparent;color:#78746e"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><path d="M8 3.25v9.5M3.25 8h9.5"></path></svg></button></span>
+      </div>
+      <a href="#" style="height:36px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-bottom:1px solid #ded9d4;color:#1d1a17">
+        <svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="Без приоритета" style="flex:none;display:block"><path d="M2 7h2M6 7h2M10 7h2" stroke="#847f7a" stroke-width="1.5" stroke-linecap="round"></path></svg>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap">ROBOT-7</span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" role="img" aria-label="Статус: Готово" style="flex:none;display:block"><circle cx="7" cy="7" r="6" fill="#33854a"></circle><path d="m4.4 7.1 1.8 1.8 3.5-3.6" stroke="#fcfaf7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span style="min-width:0;display:flex;align-items:center;gap:6px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d1a17;font:400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;">Выбрать датчик цвета</span>
+          
+        </span>
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Софт</span>
+        <span style="min-width:0;display:flex;align-items:center;gap:12px;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:4px"><span class="ppm-sr">Материалов: 2</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M11.25 7.5 7.4 11.35a2.25 2.25 0 0 1-3.18-3.18l4.6-4.6a1.5 1.5 0 0 1 2.12 2.12l-4.42 4.42a.75.75 0 0 1-1.06-1.06l3.9-3.9"></path></svg><span aria-hidden="true" style="color:#46423d">2</span></span></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:8px;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">ОС</span>Олег С.</span>
+        <span style="text-align:right;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap"></span>
+      </a>
+      <a href="#" style="height:36px;box-sizing:border-box;display:grid;grid-template-columns:16px 60px 16px minmax(0,1fr) 80px 128px 100px 52px;column-gap:12px;align-items:center;padding:0 24px;border-bottom:1px solid #ded9d4;color:#1d1a17">
+        <svg width="14" height="14" viewBox="0 0 14 14" role="img" aria-label="Без приоритета" style="flex:none;display:block"><path d="M2 7h2M6 7h2M10 7h2" stroke="#847f7a" stroke-width="1.5" stroke-linecap="round"></path></svg>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap">ROBOT-11</span>
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none" role="img" aria-label="Статус: Готово" style="flex:none;display:block"><circle cx="7" cy="7" r="6" fill="#33854a"></circle><path d="m4.4 7.1 1.8 1.8 3.5-3.6" stroke="#fcfaf7" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"></path></svg>
+        <span style="min-width:0;display:flex;align-items:center;gap:6px">
+          <span style="min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:#1d1a17;font:400 14px/20px 'IBM Plex Sans',system-ui,sans-serif;">Подключить сервопривод захвата</span>
+          
+        </span>
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Механика</span>
+        <span style="min-width:0;display:flex;align-items:center;gap:12px;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace;white-space:nowrap"><span style="display:inline-flex;align-items:center;gap:4px"><span class="ppm-sr">Материалов: 1</span><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M11.25 7.5 7.4 11.35a2.25 2.25 0 0 1-3.18-3.18l4.6-4.6a1.5 1.5 0 0 1 2.12 2.12l-4.42 4.42a.75.75 0 0 1-1.06-1.06l3.9-3.9"></path></svg><span aria-hidden="true" style="color:#46423d">1</span></span></span>
+        <span style="min-width:0;display:flex;align-items:center;gap:8px;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">МК</span>Миша К.</span>
+        <span style="text-align:right;color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;font-variant-numeric:tabular-nums;white-space:nowrap"></span>
+      </a>
+    </section>
+    <section aria-label="Отменена: 0">
+      <div style="height:36px;box-sizing:border-box;display:flex;align-items:center;padding:0 18px 0 24px;background:#f6f3ef;border-bottom:1px solid #ded9d4">
+        <h2 style="margin:0;display:flex;min-width:0"><button type="button" aria-expanded="false" style="display:flex;align-items:center;gap:0;height:28px;padding:0 6px 0 0;border:0;border-radius:6px;background:transparent;white-space:nowrap">
+          <span style="width:16px;display:flex;justify-content:center"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="m6.5 4.75 3.25 3.25-3.25 3.25"></path></svg></span>
+          <span style="width:12px"></span>
+          <svg width="14" height="14" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#78746e" stroke-width="1.5"></circle><path d="m5.1 5.1 3.8 3.8M8.9 5.1 5.1 8.9" stroke="#78746e" stroke-width="1.5" stroke-linecap="round"></path></svg>
+          <span style="margin-left:8px;color:#46423d;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">Отменена</span>
+          <span style="margin-left:8px;color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">0</span>
+        </button></h2>
+        <span style="margin-left:10px;color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap">Отменённых задач нет — все планы в силе</span>
+        
+      </div>
+    </section>
+  </div>
+</main>
+
+<aside aria-label="Требует внимания" style="flex:none;width:304px;box-sizing:border-box;display:flex;flex-direction:column;border-left:1px solid #ded9d4">
+  <div style="flex:none;height:52px;box-sizing:border-box;display:flex;align-items:center;gap:8px;padding:0 12px 0 20px">
+    <h2 style="margin:0;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">Требует внимания</h2>
+    <span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">2</span>
+    <span style="margin-left:auto;display:flex"><button type="button" aria-label="Скрыть колонку" title="Скрыть колонку" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;padding:0;border:0;border-radius:6px;background:transparent;color:#615d58"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:currentColor"><rect x="2.25" y="2.75" width="11.5" height="10.5" rx="1.5"></rect><path d="M9.75 2.75v10.5"></path></svg></button></span>
+  </div>
+  <div style="flex:none;display:flex;flex-direction:column;padding:0 8px">
+    <div style="height:28px;box-sizing:border-box;display:flex;align-items:flex-end;gap:6px;padding:0 12px 4px;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Заблокировано<span style="font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">1</span></div>
+    <a href="#" style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px 8px;border-radius:6px;color:#1d1a17">
+        <span style="flex:none;padding-top:1px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#c44037"><path d="M2.5 8h8.75"></path><path d="M12.25 4.25v7.5"></path></svg></span>
+        <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+          <span style="display:flex;align-items:center;gap:6px;color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span style="font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-15</span><span aria-hidden="true">·</span>Даша П.</span>
+          <span style="color:#1d1a17;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif">Сценарий сортировки по 4 цветам</span>
+          <span style="color:#46423d;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">Ждёт <span style="font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-12</span> · Откалибровать датчик цвета</span>
+        </span>
+      </a>
+    <div style="height:28px;box-sizing:border-box;display:flex;align-items:flex-end;gap:6px;padding:0 12px 4px;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Ждёт проверки<span style="font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">1</span></div>
+    <a href="#" style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px 8px;border-radius:6px;color:#1d1a17">
+        <span style="flex:none;padding-top:1px"><svg width="16" height="16" viewBox="0 0 14 14" fill="none" aria-hidden="true" style="flex:none;display:block"><circle cx="7" cy="7" r="5.25" stroke="#7c58a3" stroke-width="1.5"></circle><path d="M7 3.75A3.25 3.25 0 1 1 3.75 7H7Z" fill="#7c58a3"></path></svg></span>
+        <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+          <span style="display:flex;align-items:center;gap:6px;color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif;white-space:nowrap"><span style="font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-9</span><span aria-hidden="true">·</span>Миша К.</span>
+          <span style="color:#1d1a17;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif">Собрать захват из 3D-деталей</span>
+          <span style="color:#46423d;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Изменена сегодня, 10:05</span>
+        </span>
+      </a>
+    <div style="height:28px;box-sizing:border-box;display:flex;align-items:flex-end;gap:6px;padding:0 12px 4px;color:#615d58;font:500 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Просрочено<span style="font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">0</span></div>
+    <div style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px 4px">
+      <span style="flex:none;padding-top:2px"><svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#307e46"><path d="m3.75 8.25 2.75 2.75 5.75-6"></path></svg></span>
+      <span style="display:flex;flex-direction:column;gap:2px">
+        <span style="color:#46423d;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif">Просроченных задач нет</span>
+        <span style="color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Ближайший срок — <span style="font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-12</span>, 26 сент.</span>
+      </span>
+    </div>
+  </div>
+  <span aria-hidden="true" style="flex:none;display:block;height:1px;margin:16px 20px 0;background:#ded9d4"></span>
+  <h2 style="flex:none;margin:0;padding:14px 20px 4px;color:#1d1a17;font:600 14px/20px 'IBM Plex Sans',system-ui,sans-serif">Недавно изменённые</h2>
+  <ol style="flex:none;list-style:none;margin:0;padding:0 8px;display:flex;flex-direction:column;gap:2px">
+    <li><a href="#" style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px;border-radius:6px;color:#1d1a17">
+        <span style="flex:none;padding-top:2px"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">ДП</span></span>
+        <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+          <span style="color:#1d1a17;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-12</span><span aria-hidden="true" style="color:#615d58"> · </span>Откалибровать датчик цвета</span>
+          <span style="color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Даша П. · сегодня, 11:52</span>
+        </span>
+      </a></li>
+    <li><a href="#" style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px;border-radius:6px;color:#1d1a17">
+        <span style="flex:none;padding-top:2px"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">МК</span></span>
+        <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+          <span style="color:#1d1a17;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-9</span><span aria-hidden="true" style="color:#615d58"> · </span>Собрать захват из 3D-деталей</span>
+          <span style="color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Миша К. · сегодня, 10:05</span>
+        </span>
+      </a></li>
+    <li><a href="#" style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px;border-radius:6px;color:#1d1a17">
+        <span style="flex:none;padding-top:2px"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">ОС</span></span>
+        <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+          <span style="color:#1d1a17;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-16</span><span aria-hidden="true" style="color:#615d58"> · </span>Замерить скорость ленты</span>
+          <span style="color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Олег С. · вчера, 17:30</span>
+        </span>
+      </a></li>
+    <li><a href="#" style="display:flex;align-items:flex-start;gap:10px;padding:6px 12px;border-radius:6px;color:#1d1a17">
+        <span style="flex:none;padding-top:2px"><span aria-hidden="true" style="flex:none;display:inline-flex;align-items:center;justify-content:center;width:20px;height:20px;border-radius:50%;background:#e8e5df;color:#46423d;font:600 11px/1 'IBM Plex Sans',system-ui,sans-serif;letter-spacing:0">АЛ</span></span>
+        <span style="min-width:0;display:flex;flex-direction:column;gap:2px">
+          <span style="color:#1d1a17;font:400 13px/20px 'IBM Plex Sans',system-ui,sans-serif;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap"><span style="color:#615d58;font:400 12px/16px 'IBM Plex Mono',ui-monospace,monospace">ROBOT-15</span><span aria-hidden="true" style="color:#615d58"> · </span>Сценарий сортировки по 4 цветам</span>
+          <span style="color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif">Анна Л. · вчера, 16:12</span>
+        </span>
+      </a></li>
+  </ol>
+  <p style="flex:none;margin:auto 0 0;display:flex;align-items:flex-start;gap:8px;padding:12px 20px;border-top:1px solid #ded9d4;color:#615d58;font:400 12px/16px 'IBM Plex Sans',system-ui,sans-serif"><svg width="14" height="14" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" style="flex:none;display:block;color:#78746e"><path d="M3.25 2.75 7.25 13l1.5-4.25L13 7.25Z"></path></svg><span>Нажмите на задачу — справа откроется её карточка, а эта колонка спрячется.</span></p>
+</aside>
+</div>
+</div>
+</x-dc>
+<script type="text/x-dc" data-dc-script data-props='{"$preview":{"width":1440,"height":900}}'>
+class Component extends DCLogic {
+renderVals() {
+return {};
+}
+}
+</script>
+</body>
+</html>
