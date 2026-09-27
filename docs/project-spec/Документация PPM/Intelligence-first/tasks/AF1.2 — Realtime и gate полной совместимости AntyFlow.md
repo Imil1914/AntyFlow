@@ -2,10 +2,10 @@
 type: implementation_task
 project_id: intellect-ppm
 task_id: AF1.2
-status: in_progress
+status: review
 priority: P0
 created: 2026-09-19
-updated: 2026-09-25
+updated: 2026-09-27
 ---
 
 # AF1.2 — Realtime и gate полной совместимости AntyFlow
@@ -852,3 +852,9 @@ upload → HEAD → signed download дал `204 → 24 bytes → 200`, зате�
 - reconciliation теряет canonical data;
 - parity объявляется без проверяемой матрицы;
 - release имеет открытый P0/P1.
+
+## PPM 1.0 RC.1 (2026-09-27)
+
+Авто-слияние совместных правок (RC-2) вместо блокировки доски, повторное подключение без ручного режима (D-4); браузерный gate на облике v2: Chrome 25/0/1, Firefox 25/0/1, WebKit 24/1/1 (зависание под нагрузкой gate), полный Chrome с восстановлением 25/0/1. Открыто для владельца: 7 расхождений матрицы 21, ручной a11y-аудит — известное ограничение.
+
+Коммиты `plane-fork`: `cd039ae82e`…`8267e0c290`; журнал решений — `.superpowers/sdd/2026-09-26-ppm-rc/progress.md`; заметки о выпуске — `../RELEASE-NOTES-1.0-RC.md`.

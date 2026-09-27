@@ -4,7 +4,7 @@ project_id: intellect-ppm
 status: active
 version: 46
 created: 2026-09-12
-updated: 2026-09-24
+updated: 2026-09-27
 ---
 
 # Очередь задач Intelligence-first
@@ -35,7 +35,7 @@ updated: 2026-09-24
 | [I0.6 — Проекция Plane Work Item на Canvas](<I0.6 — Проекция Plane Work Item на Canvas.md>) | P0 | `review` | I0.5 | одна задача в двух представлениях |
 | [I0.7 — Project Vault Markdown и PDF MVP](<I0.7 — Project Vault Markdown и PDF MVP.md>) | P0 | `review` | I0.3 | реализовано, требуется решение владельца |
 | [I0.8 — Project Brain ingestion и изолированный индекс](<I0.8 — Project Brain ingestion и изолированный индекс.md>) | P0 | `review` | I0.6, I0.7 | реализовано: versioned ingestion, изоляция, keyword/hybrid retrieval и UI |
-| [I0.10 — Единый demo deploy и release gate](<I0.10 — Единый demo deploy и release gate.md>) | P0 | `planned` | I0.8, AF1.2 | единый deploy и parity текущего объёма |
+| [I0.10 — Единый demo deploy и release gate](<I0.10 — Единый demo deploy и release gate.md>) | P0 | `review` | I0.8, AF1.2 | единый deploy и parity текущего объёма |
 
 ## Этап AF0 — полноценный AntyFlow Canvas в web
 
@@ -51,7 +51,7 @@ updated: 2026-09-24
 
 | Задача | P | Статус | Зависит от | Результат |
 |---|---:|---|---|---|
-| [AF1.2 — Realtime и gate полной совместимости AntyFlow](<AF1.2 — Realtime и gate полной совместимости AntyFlow.md>) | P0 | `in_progress` | AF0.1–AF0.5 | Chrome/Firefox/WebKit по `19/19`: права/отзыв, глобальный администратор без членства с WebSocket audit, offline/reconnect, долговечный черновик, повтор сохранения с прежним operation ID при временном HTTP-сбое, `320 px`, Axe WCAG A/AA и 300 фигур. Web unit suite `92 passed`; TypeScript/Oxlint/Oxfmt и production build прошли. Синтетический `.flow.json` импортирован в «I03 Проверка» и пережил reload. Полный локальный ARM64 gate восстановил PostgreSQL, Vault и Plane attachment в отдельные БД/тома/хранилище и проверил контрольные суммы, вход четырёх ролей и межпроектный запрет. Опубликованный CI workflow, реальный desktop-файл, очередь для закрытого браузера, ручной a11y/скринридер, целевая VM и owner-approved parity остаются открытыми |
+| [AF1.2 — Realtime и gate полной совместимости AntyFlow](<AF1.2 — Realtime и gate полной совместимости AntyFlow.md>) | P0 | `review` | AF0.1–AF0.5 | Chrome/Firefox/WebKit по `19/19`: права/отзыв, глобальный администратор без членства с WebSocket audit, offline/reconnect, долговечный черновик, повтор сохранения с прежним operation ID при временном HTTP-сбое, `320 px`, Axe WCAG A/AA и 300 фигур. Web unit suite `92 passed`; TypeScript/Oxlint/Oxfmt и production build прошли. Синтетический `.flow.json` импортирован в «I03 Проверка» и пережил reload. Полный локальный ARM64 gate восстановил PostgreSQL, Vault и Plane attachment в отдельные БД/тома/хранилище и проверил контрольные суммы, вход четырёх ролей и межпроектный запрет. Опубликованный CI workflow, реальный desktop-файл, очередь для закрытого браузера, ручной a11y/скринридер, целевая VM и owner-approved parity остаются открытыми |
 
 ## Этап UX/ADM — завершение оболочки и защищённое администрирование
 
@@ -78,25 +78,22 @@ updated: 2026-09-24
 | [G0.1 — Repository links и ручные связи с Work Items](<G0.1 — Repository links и ручные связи с Work Items.md>) | P0 | `accepted` | AF0.1 | repository URLs и ручные Git↔Work Item/Canvas links |
 | [G1.1 — Первый внешний Git provider и webhooks](<G1.1 — Первый внешний Git provider и webhooks.md>) | P0 | `review` | G0.1 | GitHub App, commits/PR sync и подписанный repository webhook проверены вживую |
 | [G1.2 — Git projections и code RAG](<G1.2 — Git projections и code RAG.md>) | P0 | `review` | G1.1, I1.2, AF0.3 | проекции, code indexing, citations и revoke проверены вживую |
-| [G1.3 — Git write actions и draft PR с подтверждением](<G1.3 — Git write actions и draft PR с подтверждением.md>) | P0 | `in_progress` | G1.1, Git write-permission ADR | preview/decision, provider primitives и live permission diagnostics готовы; apply выключен до ADR |
+| [G1.3 — Git write actions и draft PR с подтверждением](<G1.3 — Git write actions и draft PR с подтверждением.md>) | P0 | `review` | G1.1, Git write-permission ADR | preview/decision, provider primitives и live permission diagnostics готовы; apply выключен до ADR |
 | [G2.1 — ADR и внедрение self-hosted Git provider](<G2.1 — ADR и внедрение self-hosted Git provider.md>) | P2 | `planned` | G1.2 | собственный Git-контур без самописного Git |
 
 ## Этап O — production и финальная приёмка
 
 | Задача | P | Статус | Зависит от | Результат |
 |---|---:|---|---|---|
-| [O0.1 — Production hardening, backup и observability](<O0.1 — Production hardening, backup и observability.md>) | P0 | `planned` | AF1.2, G1.3, I0.10 | воспроизводимый deploy и проверенное восстановление |
-| [O0.2 — PPM release candidate и финальная приёмка](<O0.2 — PPM release candidate и финальная приёмка.md>) | P0 | `planned` | O0.1, обязательные gates | единая принятая сборка PPM |
+| [O0.1 — Production hardening, backup и observability](<O0.1 — Production hardening, backup и observability.md>) | P0 | `review` | AF1.2, G1.3, I0.10 | воспроизводимый deploy и проверенное восстановление |
+| [O0.2 — PPM release candidate и финальная приёмка](<O0.2 — PPM release candidate и финальная приёмка.md>) | P0 | `in_progress` | O0.1, обязательные gates | единая принятая сборка PPM |
 
 ## Следующее действие
 
-Для AF1.2 опубликовать и проверить подготовленный ручной CI workflow, согласовать performance-бюджеты
-и проверить целевую VM; затем закрыть полный a11y и эксплуатационный backup/restore,
-parity gate и решить
-фоновую offline-очередь. Локально 17 браузерных сценариев проходят во всех трёх движках;
-клавиатурный срез не заменяет полный аудит доступности.
-Параллельный обязательный поток — owner review
-I1.2/G1.1/G1.2 и завершение пользовательского Git write flow G1.3.
+PPM 1.0 RC.1 собран и закоммичен (2026-09-27): приёмка владельца по чек-листу «Чек-лист приёмки владельца — PPM 1.0 RC»
+на локальном стенде, решения перед открытием доступа (AGPL-публикация исходников, условия tldraw SDK), затем
+развёртывание на сервере владельца по `plane-fork/deployments/ppm/RUNBOOK.md`. Заметки о выпуске и известные
+ограничения — `../RELEASE-NOTES-1.0-RC.md`.
 
 ## Исторический журнал реализации до решения 2026-09-23 — неисполняемый архив
 
