@@ -80,7 +80,7 @@ updated: 2026-09-27
 | [G1.1 — Первый внешний Git provider и webhooks](<G1.1 — Первый внешний Git provider и webhooks.md>) | P0 | `review` | G0.1 | GitHub App, commits/PR sync и подписанный repository webhook проверены вживую |
 | [G1.2 — Git projections и code RAG](<G1.2 — Git projections и code RAG.md>) | P0 | `review` | G1.1, I1.2, AF0.3 | проекции, code indexing, citations и revoke проверены вживую |
 | [G1.3 — Git write actions и draft PR с подтверждением](<G1.3 — Git write actions и draft PR с подтверждением.md>) | P0 | `review` | G1.1, Git write-permission ADR | preview/decision, provider primitives и live permission diagnostics готовы; apply выключен до ADR |
-| [G2.1 — ADR и внедрение self-hosted Git provider](<G2.1 — ADR и внедрение self-hosted Git provider.md>) | P0 | `in_progress` | G1.2, O0.1 | собственный Git-сервер Forgejo рядом с PPM (решение владельца 2026-09-28, объём «Быстрый»): push/pull/PR на своём сервере, провайдер `forgejo` в PPM, бэкапы и RUNBOOK |
+| [G2.1 — ADR и внедрение self-hosted Git provider](<G2.1 — ADR и внедрение self-hosted Git provider.md>) | P0 | `review` | G1.2, O0.1 | собственный Git-сервер Forgejo рядом с PPM (решение владельца 2026-09-28, объём «Быстрый»): push/pull/PR на своём сервере, провайдер `forgejo` в PPM, бэкапы и RUNBOOK |
 | [G2.2 — Единый вход через PPM и автодоступы к коду](<G2.2 — Единый вход через PPM и автодоступы к коду.md>) | P1 | `planned` | G2.1 | вход в Forgejo через PPM, доступ к коду следует за проектами PPM |
 | [G2.3 — Коммиты и PR в отчётах о работе](<G2.3 — Коммиты и PR в отчётах о работе.md>) | P1 | `planned` | G2.1 | вставка коммита/PR в документы и комментарии, сводка «что сделано за период» |
 
@@ -94,7 +94,7 @@ updated: 2026-09-27
 ## Следующее действие
 
 Решение владельца 2026-09-28: PPM выкладывается на сервер вместе с собственным Git-сервером Forgejo (G2.1, объём
-«Быстрый»); идёт реализация G2.1. PPM 1.0 RC.1 собран и закоммичен (2026-09-27): приёмка владельца по чек-листу «Чек-лист приёмки владельца — PPM 1.0 RC»
+«Быстрый»); G2.1 реализована и проверена сквозной проверкой (RC.2, коммиты plane-fork 4d015f7ba1…); ждёт приёмки владельца и выкладки. PPM 1.0 RC.1 собран и закоммичен (2026-09-27): приёмка владельца по чек-листу «Чек-лист приёмки владельца — PPM 1.0 RC»
 на локальном стенде, решения перед открытием доступа (AGPL-публикация исходников, условия tldraw SDK), затем
 развёртывание на сервере владельца по `plane-fork/deployments/ppm/RUNBOOK.md`. Заметки о выпуске и известные
 ограничения — `../RELEASE-NOTES-1.0-RC.md`.
