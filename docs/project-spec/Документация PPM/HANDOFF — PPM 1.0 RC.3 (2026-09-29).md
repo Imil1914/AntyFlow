@@ -35,14 +35,18 @@ status: current
     - `apps/admin` (`/god-mode`), `apps/space` (публикация), `apps/live` (Hocuspocus, совместное редактирование);
     - `packages/*`: `@ppm/brand` (строки en/ru), `@plane/editor` (Tiptap), `@ppm/canvas` и др.;
     - `deployments/ppm` — комплект развёртывания: Docker Compose, Caddy, bash-скрипты, `RUNBOOK.md`.
-- **Ветка** в обоих репозиториях: `feat/i0.6-work-item-projections`. **Ничего не опубликовано (push не делался)** —
-  публикация только с явного разрешения владельца.
+- **Ветка** в обоих репозиториях: `feat/i0.6-work-item-projections`. **Опубликовано 2026-09-30 по решению владельца**
+  (репозитории GitHub публичные): ветка и метки `ppm-1.0.0-rc.1…rc.4` в `Imil1914/PPM` и `Imil1914/plane`; в форке
+  создана `main` от Plane `v1.4.2` (точка, от которой начата работа PPM). PR: `Imil1914/PPM` main ← ветка и
+  `Imil1914/plane` main ← ветка (открывает владелец по подготовленным ссылкам). Дальнейшие push — только с разрешения
+  владельца.
 
 ---
 
 ## 2. Обязательные правила (нарушать нельзя)
 
-1. **Без push и публикации** без явного «да» владельца. Коммиты — локальные.
+1. **Push и публикация — только с явного «да» владельца** (ветка уже на GitHub; новые коммиты — локально, пока
+   владелец не скажет отправить).
 2. **Коммиты в `plane-fork` — только через временный индекс.** Там husky/lint-staged: `GIT_INDEX_FILE=<tmp> git read-tree HEAD`
    → `git add -A -- <пути>` → `git write-tree` → `git commit-tree` → `git update-ref` → `git read-tree HEAD`.
    Никогда не `git add` (в т.ч. `-N`) в настоящий индекс `plane-fork`. Образцы скриптов —
