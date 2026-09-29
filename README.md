@@ -1,188 +1,96 @@
-# PPM — система интеллекта проекта
+# AntyFlow
 
-PPM объединяет управление работой, визуальный холст, проектные знания, поиск и разработку в одной среде для команд.
+**AntyFlow** (приложение «Flow») — локальное десктоп-приложение на Electron, React и tldraw: бесконечный AI-холст с
+нодами — заметки и документы, ИИ-чаты, канбан и бэклог, таблицы, схемы, PDF с вопросами по документу, Jupyter,
+презентации, агенты и оркестратор. Работает на Windows; модели подключаются по API (OpenAI-совместимые провайдеры,
+локально — LM Studio или Ollama).
 
-Решение владельца от 2026-09-23: AI-провайдеры, генеративный Ask Project, AI-чат и проектные агенты
-исключены из текущего плана и критериев выпуска. Ранее созданный код
-сохраняется; актуальная очередь — [в мастер-плане](<docs/project-spec/Документация PPM/Intelligence-first/22 — Полный план завершения PPM.md>).
+## Что умеет
 
-```text
-Plane-powered · AntyFlow-faced · Vault-backed · Graph/RAG-assisted · Git-connected
-```
+- бесконечный холст на tldraw: все ноды — один shape `flow-node` с полем `kind`, контекст передаётся по стрелкам;
+- заметки и Markdown, Хранилище с настоящими `.md`, дерево файлов, wiki-ссылки, обратные ссылки и граф;
+- канбан и бэклог, таблицы с формулами, схемы Mermaid, код, презентации, Jupyter-ноутбуки, голосовой ввод;
+- ИИ-чат и связи контекста между нодами, PDF с вопросами по документу и локальный RAG;
+- локальные агенты (OpenCode, OpenScience, AnythingLLM) и оркестратор (pipeline, actor-critic, council и другие
+  режимы);
+- файловая и real-time синхронизация досок (`sync-server/` — Cloudflare Worker).
 
-## Состояние проекта
+Подробный снимок — [что реализовано](<docs/РЕАЛИЗОВАНО.md>).
 
-Репозиторий находится в переходной фазе:
-
-- **в коде сейчас** — рабочий desktop-прототип AntyFlow на Electron, React и tldraw;
-- **целевая система** — многокомандный web-продукт PPM с Plane Community как внутренним движком;
-- **актуальное ТЗ** — редакция Intelligence-first v5 с полным планом PPM, AntyFlow Canvas и Git-контуром;
-- **I0.1 на owner review** — чистый Plane `v1.4.2` закреплён, а golden path и persistence после restart подтверждены CI;
-- **I0.3 принята владельцем** — PPM shell, русский first path, единый login и role-safe project navigation зафиксированы отдельными локальными коммитами;
-- **I0.4 принята владельцем** — открыт browser-safe `Мозг проекта` на tldraw с note/group, визуальными стрелками, project-scoped local persistence и read-only режимом;
-- **I0.5 принята владельцем** — Canvas хранится на сервере, переживает restart, создаёт immutable versions, соблюдает project roles и защищён от silent overwrite;
-- **I0.6 готова к owner review** — Canvas показывает live-проекции Plane Work Items, поддерживает безопасные quick edits и не создаёт вторую базу задач.
-- **I1.1 готова к owner review** — Project Vault поддерживает wiki-ссылки/backlinks, карту связей, rename/move,
-  версии, корзину, безопасный ZIP и явный обмен с `Документами`.
-- **I1.2 готова к owner review** — подтверждённые semantic edges участвуют в GraphRAG с глубиной `0–2` и
-  объяснимым путём, а решения/сводки Project Memory хранят версии источников и помечаются устаревшими.
-- **новый приоритет AF** — перенести вид и функциональность desktop AntyFlow в web PPM: один Canvas проекта,
-  много общих досок, командный доступ и protected global admin для всех проектов.
-- **Git включён в обязательный план PPM 1.0** — repository links, provider/webhooks, branches, commits, pull requests,
-  Canvas projections, code RAG и write actions с preview/approve.
-
-Это важно: существующий Electron-код не выдаётся за готовую web-платформу. Он служит источником Canvas, Vault и графа; AI-функции desktop-прототипа сейчас не переносятся.
-
-## Что должно получиться
-
-| Подсистема | Назначение | Источник истины |
-|---|---|---|
-| PPM Shell | единый интерфейс, навигация и бренд | PPM |
-| Plane Engine | пользователи, проекты, Work Items, Cycles, Modules, Views и Pages | Plane |
-| Project Canvas | визуальные проекции объектов и смысловые связи | PPM |
-| Project Vault | папки, Markdown, PDF и файлы | PPM Vault |
-| Project Brain | индекс, поиск, граф знаний, память и проверяемые источники без AI-модели | производный индекс PPM |
-| Git contour | repositories, branches, commits и pull requests | Git provider |
-
-Ключевой принцип: одна сущность имеет одного владельца. Canvas показывает проекцию задачи или файла, но не создаёт их вторую независимую копию.
-
-## Что уже реализовано в прототипе
-
-- бесконечный Canvas на tldraw;
-- заметки, Markdown и Project Vault с реальными `.md`;
-- дерево файлов, wiki-links, backlinks и граф;
-- Kanban/backlog-ноды;
-- AI-chat и связи контекста между нодами;
-- PDF Q&A и локальный RAG;
-- презентации, Mermaid, Jupyter и голосовой ввод;
-- локальные агенты и оркестратор;
-- файловая и real-time синхронизация Canvas.
-
-Подробный технический снимок: [что реализовано](<docs/РЕАЛИЗОВАНО.md>).
-
-## Документация
-
-Начинать следует отсюда:
-
-1. [Каноническое ТЗ Intelligence-first v5](<docs/project-spec/Документация PPM/Intelligence-first/README.md>)
-2. [Принятое архитектурное решение](<docs/project-spec/Документация PPM/Intelligence-first/Решение — AntyFlow-first система интеллекта проекта.md>)
-3. [План реализации и релизы](<docs/project-spec/Документация PPM/Intelligence-first/15 — План реализации и релизы.md>)
-4. [Очередь исполнимых задач](<docs/project-spec/Документация PPM/Intelligence-first/tasks/README.md>)
-5. [Руководство исполнения для Codex](<docs/project-spec/Документация PPM/Intelligence-first/17 — Руководство исполнения для Codex.md>)
-6. [Матрица требований и тестов](<docs/project-spec/Документация PPM/Intelligence-first/20 — Матрица требований и трассировка.md>)
-7. [Решение о полном AntyFlow Canvas](<docs/project-spec/Документация PPM/Intelligence-first/Решение — Полноценный AntyFlow Canvas в web PPM.md>)
-8. [Матрица desktop → web](<docs/project-spec/Документация PPM/Intelligence-first/21 — Матрица переноса AntyFlow desktop в web.md>)
-9. [Полный план завершения PPM](<docs/project-spec/Документация PPM/Intelligence-first/22 — Полный план завершения PPM.md>)
-
-Полный архив документации, включая исторические редакции: [docs/project-spec](<docs/project-spec/README.md>).
-
-## Быстрый запуск текущего desktop-прототипа
+## Быстрый запуск
 
 ### Требования
 
 - Windows 10/11;
 - Node.js 20 LTS или 22 LTS;
 - Git;
-- опционально: Python 3, LM Studio/Ollama и ComfyUI.
+- по желанию: Python 3, LM Studio/Ollama и ComfyUI.
 
-### Установка
+### Установка и запуск
 
 ```bash
-git clone https://github.com/Imil1914/PPM.git
-cd PPM
+git clone https://github.com/Imil1914/AntyFlow.git
+cd AntyFlow
 npm ci
 npm run dev
 ```
 
-Node.js 24 пока не используется: для закреплённой версии `better-sqlite3` нет подходящего prebuilt binary в проверенном окружении. Ограничение зафиксировано также в `package.json`.
+Node.js 24 пока не используется: для закреплённой версии `better-sqlite3` нет подходящего готового бинарника в
+проверенном окружении (ограничение записано и в `package.json`). Как пересобрать `better-sqlite3` под Electron —
+[`CLAUDE.md`](CLAUDE.md), раздел «Нативные модули».
 
 ### Проверки
 
 ```bash
-npm test
-npm run build
+npm test         # vitest, включая проверку базовой линии типов (docs/materials-orchestrator/baselines)
+npm run build    # сборка electron-vite в out/
 ```
 
-### Windows-установщик
+### Установщик Windows
 
 ```bash
-npm run dist
+npm run dist     # установщик и release/win-unpacked/Flow.exe
 ```
 
 Перед `npm run dist` закройте запущенный `Flow.exe`: Windows может заблокировать замену файлов в `release/`.
 
-## Запуск Plane baseline
-
-Plane Community подключён отдельным Git submodule. Неизменяемый upstream baseline закреплён на release `v1.4.2`, commit `5f7d92784c403f76284f0f16718f320221dc7fec`; применённая цепочка PPM-патчей отдельно зафиксирована в `infra/plane/baseline-manifest.json`. Для получения исходников после обычного clone выполните:
-
-```bash
-git submodule update --init --recursive
-npm run plane:bootstrap
-npm run plane:verify
-```
-
-Если рабочая ветка уже содержит последующие PPM-задачи, неизменяемый upstream baseline проверяется без отката
-командой `npm run plane:verify:baseline`; строгий `plane:verify` остаётся release-gate для чистого закреплённого
-integration checkout.
-
-Полный безопасный запуск, golden smoke и restart-проверка: [infra/plane/README.md](infra/plane/README.md). Лицензия и происхождение Plane зафиксированы в [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
-
-## Настройка AI в прототипе
+## Настройка ИИ
 
 1. Откройте командное меню `Ctrl+K`.
-2. Выберите `Настройки провайдеров`.
-3. Укажите OpenAI-compatible `baseURL`, модель и собственный API-ключ.
+2. Выберите «Настройки провайдеров».
+3. Укажите OpenAI-совместимый `baseURL`, модель и собственный API-ключ.
 
-Для локального LM Studio обычно используется `http://127.0.0.1:1234/v1`. Секреты хранятся локально в профиле приложения и не должны попадать в Git.
+Для локального LM Studio обычно используется `http://127.0.0.1:1234/v1`. Секреты хранятся локально в профиле
+приложения (`%APPDATA%/flow/`) и не должны попадать в Git.
 
 ## Структура репозитория
 
 ```text
-src/main/                 Electron main, IPC, Vault, AI и orchestration
-src/preload/              безопасный bridge между main и renderer
-src/renderer/src/         React UI, Canvas, shapes, Vault и инструменты
-sync-server/              Cloudflare Worker для tldraw real-time sync
-scripts/                  подготовка sidecars и сборочные утилиты
-plane-fork/               Plane Community v1.4.2 + проверяемая цепочка PPM-патчей
-infra/plane/              manifest, runbook и runtime-проверки Plane
-docs/                     техническая и продуктовая документация
-docs/project-spec/        полный экспорт документации PPM
-AGENTS.md                  обязательные правила для Codex и других агентов
+src/main/            Electron main: IPC, провайдеры моделей, агенты, оркестратор, PDF, Vault
+src/preload/         безопасный мост window.flow между main и renderer
+src/renderer/src/    React UI: холст, ноды, доски, сайдбар, Хранилище
+src/shared/          общий код main и renderer (профиль оркестратора)
+sync-server/         Cloudflare Worker для real-time синхронизации досок
+scripts/             подготовка сайдкаров, иконка, сборка AnythingLLM
+build/               ресурсы установщика (иконки)
+docs/                ТЗ и журнал пакета улучшений, план упаковки, материаловедческий оркестратор
 ```
 
-## Как выполнять задачи
+## Документация
 
-1. Прочитать [AGENTS.md](AGENTS.md).
-2. Открыть [очередь](<docs/project-spec/Документация PPM/Intelligence-first/tasks/README.md>).
-3. Выбрать одну карточку с выполненными зависимостями.
-4. Не расширять её scope без решения владельца.
-5. Реализовать изменение, выполнить указанные проверки и оформить небольшой reviewable commit.
-6. Не ставить `accepted` самостоятельно: финальную приёмку делает владелец.
-
-Текущие gates: owner review
-[I1.2 — Semantic GraphRAG и память проекта](<docs/project-spec/Документация PPM/Intelligence-first/tasks/I1.2 — Semantic GraphRAG и память проекта.md>),
-[G1.1 — GitHub provider и webhooks](<docs/project-spec/Документация PPM/Intelligence-first/tasks/G1.1 — Первый внешний Git provider и webhooks.md>)
-и [G1.2 — Git projections и code RAG](<docs/project-spec/Документация PPM/Intelligence-first/tasks/G1.2 — Git projections и code RAG.md>).
-GitHub App, подписанный repository webhook, reconciliation, project-scoped RBAC, Git projections на Canvas,
-безопасная opt-in индексация кода, точные citations и disconnect/purge/reconnect проверены на реальном репозитории.
-Ранее реализованный локальный agent foundation I1.3 сохранён в коде и
-исторической [карточке](<docs/project-spec/Документация PPM/Intelligence-first/tasks/I1.3 — Проектные агенты и approval actions.md>).
-Эта линия отложена и не входит в текущую очередь или release gate.
-[Инструкция настройки GitHub App](docs/ppm/github-app-setup.md).
+- [`CLAUDE.md`](CLAUDE.md) — как поднять, собрать и проверить проект, соглашения (памятка для агентов и разработчиков);
+- [ТЗ пакета улучшений v1](docs/TZ-improvements.md) и [журнал выполнения](docs/CHANGELOG-improvements.md);
+- [план упаковки OpenCode, OpenScience и AnythingLLM в установщик](docs/bundling-plan.md);
+- [материаловедческий оркестратор](docs/materials-orchestrator/README.md);
+- [что реализовано](<docs/РЕАЛИЗОВАНО.md>);
+- [сервер синхронизации](sync-server/README.md).
 
 ## Безопасность
 
-- не коммитьте `.env`, API keys, tokens, cookies и пользовательские данные;
-- не помещайте secrets в Canvas snapshots, логи или тестовые fixtures;
-- существующие AI-записи не входят в текущую очередь и не должны включаться без отдельного решения владельца;
-- доступ к Vault, RAG и Git всегда ограничивается текущим workspace/project.
+- не коммитьте `.env`, API-ключи, токены, cookies и пользовательские данные;
+- не помещайте секреты в снимки холста, логи и тестовые данные.
 
-## Лицензирование
+## История и лицензия
 
-Лицензия собственного кода PPM пока не зафиксирована отдельным решением. Не добавляйте и не меняйте лицензию без согласования с владельцем.
-
-Plane Community используется поэтапно через контролируемый fork. Модифицированная сетевая поставка должна соблюдать AGPL-3.0, сохранять необходимые notices и предоставлять соответствующий исходный код. Перед публичным коммерческим запуском требуется юридическая проверка конкретной сборки.
-
-## Для агентов
-
-Корневой [AGENTS.md](AGENTS.md) является рабочим контрактом проекта. Для новых репозиториев используйте [универсальный шаблон](<docs/agent-guides/AGENTS.template.md>) и [инструкцию по адаптации](<docs/agent-guides/README.md>).
+До 2026-09-30 AntyFlow жил в одном репозитории с документацией web-продукта PPM; история коммитов сохранена целиком,
+включая старые коммиты этой документации. Лицензия AntyFlow пока не выбрана — это решение владельца.

@@ -36,12 +36,3 @@ Opensciens/
 .env.*
 providers.json
 auth.json
-
-# Локальное окружение и результаты проверок Plane baseline
-infra/plane/.runtime/
-
-# Wave artefacts of the no-commit workflow (history lives in plane-fork commits)
-docs/superpowers/plans/*/pre/
-docs/superpowers/plans/*/pre-docs/
-docs/superpowers/plans/*/checkpoints/
-docs/superpowers/plans/*/*.patch
